@@ -1,0 +1,196 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAYMENT_SUBMITTED
+  CONFIRMED
+  PACKED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum OrderSource {
+  WEB
+  WEB_CHAT
+  WHATSAPP
+}
+
+enum ReceiptStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+model Customer {
+  id           String   @id @default(cuid())
+  name         String
+  phone        String?  @unique
+  email        String?  @unique
+  passwordHash String?
+  googleId     String?  @unique
+  createdAt    DateTime @default(now())
+
+  orders Order[]
+}
+
+model Location {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  logisticsFee  Decimal  @db.Decimal(10, 2)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  orders Order[]
+}
+
+model MenuCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  menuItems MenuItem[]
+}
+
+model MenuItem {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  categoryId  String
+  description String?
+  icon        String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  category   MenuCategory     @relation(fields: [categoryId], references: [id])
+  options    MenuItemOption[]
+  orderItems OrderItem[]
+}
+
+model MenuItemOption {
+  id         String  @id @default(cuid())
+  menuItemId String
+  size       String
+  price      Decimal @db.Decimal(10, 2)
+  active     Boolean @default(true)
+
+  menuItem   MenuItem    @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@unique([menuItemId, size])
+}
+
+model Order {
+  id           String      @id @default(cuid())
+  orderNumber  Int         @unique
+  narration    String      @unique
+  customerId   String
+  locationId   String
+  deliveryAddress String
+  subtotal     Decimal     @db.Decimal(10, 2)
+  logisticsFee Decimal     @db.Decimal(10, 2)
+  total        Decimal     @db.Decimal(10, 2)
+  status       OrderStatus @default(PENDING_PAYMENT)
+  source       OrderSource @default(WEB)
+  notes        String?
+  packedAt         DateTime?
+  outForDeliveryAt DateTime?
+  deliveredAt      DateTime?
+  cancelledAt      DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  customer Customer        @relation(fields: [customerId], references: [id])
+  location Location        @relation(fields: [locationId], references: [id])
+  items    OrderItem[]
+  receipts PaymentReceipt[]
+  feedback Feedback[]
+}
+
+model OrderItem {
+  id               String  @id @default(cuid())
+  orderId          String
+  menuItemId       String
+  menuItemOptionId String
+  itemName         String
+  size             String
+  unitPrice        Decimal @db.Decimal(10, 2)
+  quantity         Int
+  lineTotal        Decimal @db.Decimal(10, 2)
+
+  order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem       MenuItem       @relation(fields: [menuItemId], references: [id])
+  menuItemOption MenuItemOption @relation(fields: [menuItemOptionId], references: [id])
+}
+
+model PaymentReceipt {
+  id           String        @id @default(cuid())
+  orderId      String
+  imagePath    String?
+  senderName   String?
+  senderBank   String?
+  submittedVia OrderSource   @default(WEB)
+  status       ReceiptStatus @default(PENDING)
+  confirmedBy  String?
+  confirmedAt  DateTime?
+  createdAt    DateTime      @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Feedback {
+  id        String   @id @default(cuid())
+  orderId   String
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model PushSubscription {
+  id            String   @id @default(cuid())
+  endpoint      String   @unique
+  p256dh        String
+  auth          String
+  customerPhone String?
+  createdAt     DateTime @default(now())
+}
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+
+  costEntries CostEntry[]
+}
+
+model CostEntry {
+  id          String   @id @default(cuid())
+  description String
+  category    String
+  amount      Decimal  @db.Decimal(10, 2)
+  incurredOn  DateTime
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  createdBy AdminUser? @relation(fields: [createdById], references: [id])
+}
+
+model WhatsappMessageLog {
+  id        String   @id @default(cuid())
+  fromPhone String
+  direction String
+  body      String?
+  mediaPath String?
+  createdAt DateTime @default(now())
+}
