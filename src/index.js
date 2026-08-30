@@ -30,23 +30,29 @@ const allowedOrigins = getFrontendOrigins();
 // Single, robust CORS configuration
 const corsOptions = {
   origin: (origin, callback) => {
-    // 1. Allow non-browser requests (Postman, curl, server-to-server, healthchecks)
-    // OR if no origins are configured in ENV
+    // 1. Allow server-to-server, Postman, healthchecks, or missing origin header
     if (!origin || allowedOrigins.length === 0) {
       return callback(null, true);
     }
 
-    // 2. Strict origin check against your environment array
+    // 2. Strict matching against allowed array
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 
-    // 3. Reject untrusted browser origins
+    // 3. Reject safely without throwing a server error
     return callback(null, false);
   },
-  // credentials: true, // Set to true if using cookies/Authorization headers
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin'
+  ],
+  optionsSuccessStatus: 200 // Fixes 204 issue on proxies/older clients
 };
 
 
