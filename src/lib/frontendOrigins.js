@@ -10,7 +10,7 @@ function getFrontendOrigins() {
     const cleanedRaw = raw.replace(/^["']|["']$/g, '').trim();
     console.log(cleanedRaw);
     const resp = cleanedRaw
-        .split(',')
+        .split(/[,;\s|]+/)
         .map((origin) => origin.trim().replace(/^["']|["']$/g, '')) // clean individual items
         .filter(Boolean);
     console.log("Final Resp:", resp);
