@@ -10,7 +10,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "seed": "node prisma/seed.js"
+    "seed": "node prisma/seed.js",
+    "admin:create": "node scripts/create-admin.js",
+    "admin:reset-password": "node scripts/reset-admin-password.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
