@@ -18,6 +18,11 @@ const { apiRateLimit } = require('./middleware/security');
 
 const app = express();
 
+// Deployed behind nginx (see deploy.sh) — without this, req.ip resolves to
+// nginx's own address for every request, so express-rate-limit would rate
+// limit all real users as a single client instead of per-IP.
+app.set('trust proxy', 1);
+
 app.use(cors({ origin: process.env.FRONTEND_ORIGIN || '*' }));
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
