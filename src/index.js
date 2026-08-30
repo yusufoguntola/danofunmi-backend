@@ -30,6 +30,10 @@ const allowedOrigins = getFrontendOrigins();
 // Single, robust CORS configuration
 const corsOptions = {
   origin: (origin, callback) => {
+
+    console.log('Incoming Origin:', JSON.stringify(origin));
+    console.log('Allowed Origins Array:', allowedOrigins);
+
     // 1. Allow server-to-server, Postman, healthchecks, or missing origin header
     if (!origin || allowedOrigins.length === 0) {
       return callback(null, true);
