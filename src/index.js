@@ -42,7 +42,7 @@ const corsOptions = {
     }
 
     // 3. Reject untrusted browser origins
-    return callback(new Error('CORS policy: This origin is not allowed.'));
+    return callback(null, false);
   },
   // credentials: true, // Set to true if using cookies/Authorization headers
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
