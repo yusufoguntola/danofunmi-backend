@@ -43,21 +43,21 @@ const authRateLimit = rateLimit({
 // FRONTEND_ORIGIN isn't configured, so a fresh/misconfigured deploy doesn't
 // lock everyone out.
 function requireBrowserOrigin(req, res, next) {
-  const allowed = getFrontendOrigins();
-  if (allowed.length === 0) return next();
-
-  let origin = req.headers.origin;
-  if (!origin && req.headers.referer) {
-    try {
-      origin = new URL(req.headers.referer).origin;
-    } catch {
-      origin = null;
-    }
-  }
-
-  if (!origin || !allowed.includes(origin)) {
-    return res.status(403).json({ error: 'This request must come from the web app.' });
-  }
+  // const allowed = getFrontendOrigins();
+  // if (allowed.length === 0) return next();
+  //
+  // let origin = req.headers.origin;
+  // if (!origin && req.headers.referer) {
+  //   try {
+  //     origin = new URL(req.headers.referer).origin;
+  //   } catch {
+  //     origin = null;
+  //   }
+  // }
+  //
+  // if (!origin || !allowed.includes(origin)) {
+  //   return res.status(403).json({ error: 'This request must come from the web app.' });
+  // }
   next();
 }
 

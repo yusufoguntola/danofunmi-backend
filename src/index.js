@@ -24,8 +24,35 @@ const app = express();
 // limit all real users as a single client instead of per-IP.
 app.set('trust proxy', 1);
 
-const frontendOrigins = getFrontendOrigins();
-app.use(cors({ origin: frontendOrigins.length ? frontendOrigins : '*' }));
+const allowedOrigins = getFrontendOrigins();
+// app.use(cors({ origin: frontendOrigins.length ? frontendOrigins : '*' }));
+
+// Single, robust CORS configuration
+const corsOptions = {
+  origin: (origin, callback) => {
+    // 1. Allow non-browser requests (Postman, curl, server-to-server, healthchecks)
+    // OR if no origins are configured in ENV
+    if (!origin || allowedOrigins.length === 0) {
+      return callback(null, true);
+    }
+
+    // 2. Strict origin check against your environment array
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // 3. Reject untrusted browser origins
+    return callback(new Error('CORS policy: This origin is not allowed.'));
+  },
+  // credentials: true, // Set to true if using cookies/Authorization headers
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
+
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 app.use('/api', apiRateLimit);
