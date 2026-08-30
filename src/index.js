@@ -14,8 +14,8 @@ const chatRoutes = require('./routes/chat');
 const feedbackRoutes = require('./routes/feedback');
 const pushRoutes = require('./routes/push');
 const customerRoutes = require('./routes/customer');
-const { apiRateLimit } = require('./middleware/security');
-const { getFrontendOrigins } = require('./lib/frontendOrigins');
+const {apiRateLimit} = require('./middleware/security');
+const {getFrontendOrigins} = require('./lib/frontendOrigins');
 
 const app = express();
 
@@ -29,34 +29,30 @@ const allowedOrigins = getFrontendOrigins();
 
 // Single, robust CORS configuration
 const corsOptions = {
-  origin: (origin, callback) => {
+    origin: (origin, callback) => {
+        // 1. Allow server-to-server, Postman, healthchecks, or missing origin header
+        if (!origin || allowedOrigins.length === 0) {
+            return callback(null, true);
+        }
 
-    console.log('Incoming Origin:', JSON.stringify(origin));
-    console.log('Allowed Origins Array:', allowedOrigins);
+        // 2. Strict matching against allowed array
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
 
-    // 1. Allow server-to-server, Postman, healthchecks, or missing origin header
-    if (!origin || allowedOrigins.length === 0) {
-      return callback(null, true);
-    }
-
-    // 2. Strict matching against allowed array
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    // 3. Reject safely without throwing a server error
-    return callback(null, false);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'X-Requested-With',
-    'Accept',
-    'Origin'
-  ],
-  optionsSuccessStatus: 200 // Fixes 204 issue on proxies/older clients
+        // 3. Reject safely without throwing a server error
+        return callback(null, false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Requested-With',
+        'Accept',
+        'Origin'
+    ],
+    optionsSuccessStatus: 200 // Fixes 204 issue on proxies/older clients
 };
 
 
@@ -67,14 +63,14 @@ app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 app.use('/api', apiRateLimit);
 
-app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/health', (req, res) => res.json({ok: true}));
 
 app.get('/api/payment-info', (req, res) => {
-  res.json({
-    bankName: process.env.BANK_NAME,
-    accountName: process.env.BANK_ACCOUNT_NAME,
-    accountNumber: process.env.BANK_ACCOUNT_NUMBER,
-  });
+    res.json({
+        bankName: process.env.BANK_NAME,
+        accountName: process.env.BANK_ACCOUNT_NAME,
+        accountNumber: process.env.BANK_ACCOUNT_NUMBER,
+    });
 });
 
 // Public + mixed (admin sub-paths, e.g. /api/menu/admin/all, are guarded
@@ -93,12 +89,12 @@ app.use('/api/push', pushRoutes);
 // Internal-only, used by the whatsapp-bot service
 app.use('/api/internal', internalRoutes);
 
-app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+app.use((req, res) => res.status(404).json({error: 'Not found'}));
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  console.error(err);
-  res.status(err.status || 500).json({ error: err.message || 'Server error' });
+    console.error(err);
+    res.status(err.status || 500).json({error: err.message || 'Server error'});
 });
 
 const port = process.env.PORT || 4000;

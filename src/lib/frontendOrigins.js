@@ -4,17 +4,13 @@
 // both stay in sync with whatever origins are actually allowed.
 function getFrontendOrigins() {
     const raw = process.env.FRONTEND_ORIGIN;
-    console.log(raw);
     if (!raw) return [];
 
     const cleanedRaw = raw.replace(/^["']|["']$/g, '').trim();
-    console.log(cleanedRaw);
-    const resp = cleanedRaw
+    return cleanedRaw
         .split(/[,;\s|]+/)
         .map((origin) => origin.trim().replace(/^["']|["']$/g, '')) // clean individual items
         .filter(Boolean);
-    console.log("Final Resp:", resp);
-    return resp;
 }
 
 module.exports = {getFrontendOrigins};
