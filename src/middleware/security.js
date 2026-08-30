@@ -1,4 +1,5 @@
 const rateLimit = require('express-rate-limit');
+const { getFrontendOrigins } = require('../lib/frontendOrigins');
 
 // A generous, general ceiling on all API traffic per IP — the safety net.
 // Skips /api/internal/*, which is the whatsapp-bot's own always-on service
@@ -42,8 +43,8 @@ const authRateLimit = rateLimit({
 // FRONTEND_ORIGIN isn't configured, so a fresh/misconfigured deploy doesn't
 // lock everyone out.
 function requireBrowserOrigin(req, res, next) {
-  const allowed = process.env.FRONTEND_ORIGIN;
-  if (!allowed) return next();
+  const allowed = getFrontendOrigins();
+  if (allowed.length === 0) return next();
 
   let origin = req.headers.origin;
   if (!origin && req.headers.referer) {
@@ -54,7 +55,7 @@ function requireBrowserOrigin(req, res, next) {
     }
   }
 
-  if (origin !== allowed) {
+  if (!origin || !allowed.includes(origin)) {
     return res.status(403).json({ error: 'This request must come from the web app.' });
   }
   next();

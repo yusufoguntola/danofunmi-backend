@@ -15,6 +15,7 @@ const feedbackRoutes = require('./routes/feedback');
 const pushRoutes = require('./routes/push');
 const customerRoutes = require('./routes/customer');
 const { apiRateLimit } = require('./middleware/security');
+const { getFrontendOrigins } = require('./lib/frontendOrigins');
 
 const app = express();
 
@@ -23,7 +24,8 @@ const app = express();
 // limit all real users as a single client instead of per-IP.
 app.set('trust proxy', 1);
 
-app.use(cors({ origin: process.env.FRONTEND_ORIGIN || '*' }));
+const frontendOrigins = getFrontendOrigins();
+app.use(cors({ origin: frontendOrigins.length ? frontendOrigins : '*' }));
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 app.use('/api', apiRateLimit);
