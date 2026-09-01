@@ -1,6 +1,7 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const prisma = require('../db');
 const { createOrderRecord, priceItems, OrderValidationError } = require('./orderCreation');
+const { getCatalog } = require('./menuCatalog');
 
 const MODEL = 'claude-opus-5';
 const MAX_TOOL_ROUNDS = 6;
@@ -23,11 +24,17 @@ make the customer reply with item numbers.
 
 Responsibilities, roughly in order:
 1. Greet the customer and help them browse the menu. ALWAYS call list_menu before describing
-   items or quoting a price — never invent menu items, sizes, or prices from memory.
-2. Build up their order in the conversation (items + quantities). Confirm the running list back
-   to them in plain language as it grows. Call update_cart with the full current item list every
-   time the selection changes (add, remove, change quantity) — this keeps a live cart preview in
-   sync on the web app, so the customer can also see and finish their order there if they want.
+   items or quoting a price — never invent menu items, sizes, or prices from memory. list_menu
+   returns two kinds of entries: individual items (with sized/priced options) and combos —
+   bundles of several items sold as one unit at a combo price (already discounted where a discount
+   applies). Some combos also include a bonus item, called out separately in the combo's "items"
+   as isBonus: true — mention that it's free/included, never add it to the price. When a
+   customer wants a combo, add it with menuGroupId (quantity = number of bundles, not a per-item
+   count).
+2. Build up their order in the conversation (items + quantities, individual or combo). Confirm the
+   running list back to them in plain language as it grows. Call update_cart with the full current
+   selection every time it changes (add, remove, change quantity) — this keeps a live cart preview
+   in sync on the web app, so the customer can also see and finish their order there if they want.
 3. Once they're done choosing, call list_locations and ask which delivery location applies (this
    determines the logistics fee).
 4. Collect their full name, a phone number, and a delivery address (street, area, landmark).
@@ -44,6 +51,13 @@ Responsibilities, roughly in order:
    the narration (format DFM-XXXXXX) or the order number — to check status.
 8. If an order's status is DELIVERED (from track_order) and the customer wants to share feedback,
    ask for a 1-5 rating and an optional comment, then call submit_feedback.
+9. If a customer asks for something list_menu/list_locations can't fulfil — an item that's not on
+   the menu, a custom/bulk quantity or combination beyond what's listed, or a discount on their
+   purchase — don't just refuse. Acknowledge it warmly, ask whatever detail is needed to pass
+   along (what exactly they want, and for a discount, which order/purchase it's about), then call
+   log_special_request so the team can follow up directly. Tell them it's been noted for the team
+   but never promise it'll be granted, and never invent a price or discount yourself. Make sure to get the
+   name and contact phone number of the customer in this case (if the customer is not already authenticated)
 
 Keep replies short and warm — this is a chat interface, not an email. If a tool call fails,
 explain the problem in plain language and help the customer fix it (e.g. an invalid location or
@@ -63,7 +77,7 @@ function buildSystemPrompt(isAuthenticated) {
 const TOOLS = [
   {
     name: 'list_menu',
-    description: 'Get the current active menu: categories, items, and their priced size options (with option ids needed for create_order).',
+    description: 'Get the current active menu: categories, individual items with their priced size options, and combos (bundles of items sold as one priced unit, with option ids needed for update_cart/create_order).',
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
@@ -82,10 +96,11 @@ const TOOLS = [
           items: {
             type: 'object',
             properties: {
-              menuItemOptionId: { type: 'string', description: 'option id from list_menu' },
-              quantity: { type: 'integer', minimum: 1 },
+              menuItemOptionId: { type: 'string', description: 'An individual item\'s option id from list_menu. Give exactly one of menuItemOptionId or menuGroupId per entry.' },
+              menuGroupId: { type: 'string', description: 'A combo\'s id from list_menu. Give exactly one of menuItemOptionId or menuGroupId per entry.' },
+              quantity: { type: 'integer', minimum: 1, description: 'For a combo, the number of bundles — not a per-item count.' },
             },
-            required: ['menuItemOptionId', 'quantity'],
+            required: ['quantity'],
           },
         },
       },
@@ -112,14 +127,31 @@ const TOOLS = [
           items: {
             type: 'object',
             properties: {
-              menuItemOptionId: { type: 'string', description: 'option id from list_menu' },
-              quantity: { type: 'integer', minimum: 1 },
+              menuItemOptionId: { type: 'string', description: 'An individual item\'s option id from list_menu. Give exactly one of menuItemOptionId or menuGroupId per entry.' },
+              menuGroupId: { type: 'string', description: 'A combo\'s id from list_menu. Give exactly one of menuItemOptionId or menuGroupId per entry.' },
+              quantity: { type: 'integer', minimum: 1, description: 'For a combo, the number of bundles — not a per-item count.' },
             },
-            required: ['menuItemOptionId', 'quantity'],
+            required: ['quantity'],
           },
         },
       },
       required: ['customerName', 'customerPhone', 'deliveryAddress', 'locationId', 'items'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'log_special_request',
+    description: 'Log a customer ask that no other tool can fulfil — an item not on the menu, a custom/bulk request beyond what\'s listed, or a discount ask on a purchase — so the team can follow up. Never invents a price, item, or discount yourself; this only records the request.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        requestType: { type: 'string', enum: ['item_request', 'discount_request', 'other'] },
+        message: { type: 'string', description: 'Plain-language summary of what the customer is asking for.' },
+        customerName: { type: 'string' },
+        customerPhone: { type: 'string' },
+        orderNarration: { type: 'string', description: 'If this is about an existing/in-progress order, its narration or order number.' },
+      },
+      required: ['requestType', 'message'],
       additionalProperties: false,
     },
   },
@@ -150,21 +182,7 @@ const TOOLS = [
 ];
 
 async function toolListMenu() {
-  const items = await prisma.menuItem.findMany({
-    where: { active: true },
-    orderBy: { createdAt: 'asc' },
-    include: {
-      category: true,
-      options: { where: { active: true }, orderBy: { price: 'asc' } },
-    },
-  });
-  return items.map((item) => ({
-    id: item.id,
-    name: item.name,
-    category: item.category?.name ?? null,
-    description: item.description,
-    options: item.options.map((o) => ({ id: o.id, size: o.size, price: Number(o.price) })),
-  }));
+  return getCatalog();
 }
 
 async function toolListLocations() {
@@ -178,12 +196,15 @@ async function toolListLocations() {
 async function toolUpdateCart({ items }) {
   if (!items || items.length === 0) return { items: [], subtotal: 0 };
 
-  const { lineItems, subtotal, optionsById } = await priceItems(items);
+  const { lineItems, subtotal, optionsById, groupsById } = await priceItems(items);
   return {
     items: lineItems.map((li) => ({
       menuItemOptionId: li.menuItemOptionId,
+      menuGroupId: li.menuGroupId,
       itemName: li.itemName,
-      icon: optionsById.get(li.menuItemOptionId)?.menuItem.icon ?? null,
+      icon: li.menuGroupId
+        ? groupsById.get(li.menuGroupId)?.icon ?? null
+        : optionsById.get(li.menuItemOptionId)?.menuItem.icon ?? null,
       size: li.size,
       unitPrice: li.unitPrice,
       quantity: li.quantity,
@@ -253,6 +274,21 @@ async function toolSubmitFeedback({ narration, rating, comment }) {
   return { ok: true };
 }
 
+async function toolLogSpecialRequest({ requestType, message, customerName, customerPhone, orderNarration }, context) {
+  await prisma.extraneousRequest.create({
+    data: {
+      requestType,
+      message,
+      customerName: customerName || null,
+      customerPhone: customerPhone || null,
+      orderNarration: orderNarration || null,
+      customerId: context?.authenticatedCustomerId || null,
+      source: 'WEB_CHAT',
+    },
+  });
+  return { ok: true };
+}
+
 const HANDLERS = {
   list_menu: toolListMenu,
   list_locations: toolListLocations,
@@ -260,6 +296,7 @@ const HANDLERS = {
   create_order: toolCreateOrder,
   track_order: toolTrackOrder,
   submit_feedback: toolSubmitFeedback,
+  log_special_request: toolLogSpecialRequest,
 };
 
 async function executeTool(name, input, context) {

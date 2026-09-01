@@ -29,6 +29,11 @@ enum ReceiptStatus {
   REJECTED
 }
 
+enum DiscountType {
+  PERCENTAGE
+  FLAT
+}
+
 model Customer {
   id           String   @id @default(cuid())
   name         String
@@ -38,16 +43,17 @@ model Customer {
   googleId     String?  @unique
   createdAt    DateTime @default(now())
 
-  orders Order[]
+  orders             Order[]
+  extraneousRequests ExtraneousRequest[]
 }
 
 model Location {
-  id            String   @id @default(cuid())
-  name          String   @unique
-  logisticsFee  Decimal  @db.Decimal(10, 2)
-  active        Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(cuid())
+  name         String   @unique
+  logisticsFee Decimal  @db.Decimal(10, 2)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   orders Order[]
 }
@@ -57,7 +63,8 @@ model MenuCategory {
   name      String   @unique
   createdAt DateTime @default(now())
 
-  menuItems MenuItem[]
+  menuItems  MenuItem[]
+  menuGroups MenuGroup[]
 }
 
 model MenuItem {
@@ -81,34 +88,67 @@ model MenuItemOption {
   price      Decimal @db.Decimal(10, 2)
   active     Boolean @default(true)
 
-  menuItem   MenuItem    @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  menuItem   MenuItem        @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
   orderItems OrderItem[]
+  groupItems MenuGroupItem[]
 
   @@unique([menuItemId, size])
 }
 
+// A "combo" menu entry — a bundle of other menu items (by size/option), shown
+// in the same browsing list as individual MenuItems, priced as the sum of its
+// non-bonus items minus an optional discount. Bought as a whole (one or more
+// bundles), not broken apart into its constituent items at order time.
+model MenuGroup {
+  id            String        @id @default(cuid())
+  name          String        @unique
+  categoryId    String
+  description   String?
+  icon          String?
+  active        Boolean       @default(true)
+  discountType  DiscountType?
+  discountValue Decimal?      @db.Decimal(10, 2)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  category   MenuCategory    @relation(fields: [categoryId], references: [id])
+  items      MenuGroupItem[]
+  orderItems OrderItem[]
+}
+
+model MenuGroupItem {
+  id               String  @id @default(cuid())
+  groupId          String
+  menuItemOptionId String
+  quantity         Int     @default(1)
+  isBonus          Boolean @default(false)
+
+  group          MenuGroup      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  menuItemOption MenuItemOption @relation(fields: [menuItemOptionId], references: [id])
+}
+
 model Order {
-  id           String      @id @default(cuid())
-  orderNumber  Int         @unique
-  narration    String      @unique
-  customerId   String
-  locationId   String
-  deliveryAddress String
-  subtotal     Decimal     @db.Decimal(10, 2)
-  logisticsFee Decimal     @db.Decimal(10, 2)
-  total        Decimal     @db.Decimal(10, 2)
-  status       OrderStatus @default(PENDING_PAYMENT)
-  source       OrderSource @default(WEB)
-  notes        String?
+  id               String      @id @default(cuid())
+  orderNumber      Int         @unique
+  narration        String      @unique
+  customerId       String
+  locationId       String
+  deliveryAddress  String
+  subtotal         Decimal     @db.Decimal(10, 2)
+  logisticsFee     Decimal     @db.Decimal(10, 2)
+  total            Decimal     @db.Decimal(10, 2)
+  status           OrderStatus @default(PENDING_PAYMENT)
+  source           OrderSource @default(WEB)
+  notes            String?
   packedAt         DateTime?
   outForDeliveryAt DateTime?
   deliveredAt      DateTime?
   cancelledAt      DateTime?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 
-  customer Customer        @relation(fields: [customerId], references: [id])
-  location Location        @relation(fields: [locationId], references: [id])
+  customer Customer         @relation(fields: [customerId], references: [id])
+  location Location         @relation(fields: [locationId], references: [id])
   items    OrderItem[]
   receipts PaymentReceipt[]
   feedback Feedback[]
@@ -117,17 +157,25 @@ model Order {
 model OrderItem {
   id               String  @id @default(cuid())
   orderId          String
-  menuItemId       String
-  menuItemOptionId String
+  // Exactly one of (menuItemId + menuItemOptionId) or menuGroupId is set —
+  // an individual item line, or a combo/group line bought as a bundle.
+  menuItemId       String?
+  menuItemOptionId String?
+  menuGroupId      String?
   itemName         String
   size             String
   unitPrice        Decimal @db.Decimal(10, 2)
   quantity         Int
   lineTotal        Decimal @db.Decimal(10, 2)
+  // For a group line: a snapshot of the bundle's composition (items, bonus
+  // items, discount) at order time, so it stays accurate even if the combo
+  // is edited or deleted later. Null for individual item lines.
+  groupSnapshot    Json?
 
-  order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  menuItem       MenuItem       @relation(fields: [menuItemId], references: [id])
-  menuItemOption MenuItemOption @relation(fields: [menuItemOptionId], references: [id])
+  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem       MenuItem?       @relation(fields: [menuItemId], references: [id])
+  menuItemOption MenuItemOption? @relation(fields: [menuItemOptionId], references: [id])
+  menuGroup      MenuGroup?      @relation(fields: [menuGroupId], references: [id])
 }
 
 model PaymentReceipt {
@@ -193,4 +241,23 @@ model WhatsappMessageLog {
   body      String?
   mediaPath String?
   createdAt DateTime @default(now())
+}
+
+// A customer ask the chat bot can't fulfil itself — an item that's not on the
+// menu/quoted, a custom bulk request, or a discount ask on a purchase. Logged
+// by the AI chat so admin can follow up manually; `readAt` drives the unread
+// counter on the admin "Requests" tab.
+model ExtraneousRequest {
+  id             String      @id @default(cuid())
+  requestType    String
+  message        String
+  customerName   String?
+  customerPhone  String?
+  customerId     String?
+  orderNarration String?
+  source         OrderSource @default(WEB_CHAT)
+  readAt         DateTime?
+  createdAt      DateTime    @default(now())
+
+  customer Customer? @relation(fields: [customerId], references: [id])
 }

@@ -6,6 +6,7 @@ const prisma = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const { uploadMenuIcon, MENU_ICONS_DIR } = require('../lib/uploads');
 const { generateMenuIcon } = require('../lib/generateIcon');
+const { getCatalog, shapeGroup } = require('../lib/menuCatalog');
 
 const router = express.Router();
 
@@ -17,17 +18,16 @@ function flattenItem(item) {
   return { ...rest, category: category?.name ?? null };
 }
 
-// GET /api/menu — public, active items only
+const GROUP_INCLUDE = {
+  category: true,
+  items: { include: { menuItemOption: { include: { menuItem: true } } } },
+};
+
+// GET /api/menu — public. Active items and active combo groups, merged into
+// one list (each entry tagged `type: 'item' | 'group'`) so the frontend can
+// render them side by side in the same browsing grid.
 router.get('/', async (req, res) => {
-  const items = await prisma.menuItem.findMany({
-    where: { active: true },
-    orderBy: { createdAt: 'asc' },
-    include: {
-      category: true,
-      options: { where: { active: true }, orderBy: { price: 'asc' } },
-    },
-  });
-  res.json(items.map(flattenItem));
+  res.json(await getCatalog());
 });
 
 // GET /api/menu/admin/all — admin, all items including inactive
@@ -212,6 +212,11 @@ router.patch('/admin/options/:optionId', requireAdmin, async (req, res) => {
 
 // DELETE /api/menu/admin/options/:optionId — remove a single size/price option
 router.delete('/admin/options/:optionId', requireAdmin, async (req, res) => {
+  const usedInGroup = await prisma.menuGroupItem.findFirst({ where: { menuItemOptionId: req.params.optionId } });
+  if (usedInGroup) {
+    return res.status(409).json({ error: "This size is used in a combo — remove it from the combo first." });
+  }
+
   try {
     await prisma.menuItemOption.delete({ where: { id: req.params.optionId } });
     res.status(204).send();
@@ -224,6 +229,150 @@ router.delete('/admin/options/:optionId', requireAdmin, async (req, res) => {
     }
     console.error(err);
     res.status(500).json({ error: 'Could not delete option' });
+  }
+});
+
+// --- Menu groups (combos) ---
+
+// GET /api/menu/admin/groups/all — admin, all groups including inactive
+router.get('/admin/groups/all', requireAdmin, async (req, res) => {
+  const groups = await prisma.menuGroup.findMany({
+    orderBy: { createdAt: 'asc' },
+    include: GROUP_INCLUDE,
+  });
+  res.json(groups.map(shapeGroup));
+});
+
+// GET /api/menu/admin/groups/:id — single group detail, for the edit page
+router.get('/admin/groups/:id', requireAdmin, async (req, res) => {
+  const group = await prisma.menuGroup.findUnique({ where: { id: req.params.id }, include: GROUP_INCLUDE });
+  if (!group) return res.status(404).json({ error: 'Combo not found' });
+  res.json(shapeGroup(group));
+});
+
+// POST /api/menu/admin/groups — create a combo with its included items
+router.post('/admin/groups', requireAdmin, async (req, res) => {
+  const { name, categoryId, description, icon, discountType, discountValue, items } = req.body;
+
+  if (!name || !categoryId || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'name, categoryId, and at least one included item are required' });
+  }
+  if (discountType && !['PERCENTAGE', 'FLAT'].includes(discountType)) {
+    return res.status(400).json({ error: 'discountType must be PERCENTAGE or FLAT' });
+  }
+
+  try {
+    const group = await prisma.menuGroup.create({
+      data: {
+        name,
+        categoryId,
+        description,
+        icon,
+        discountType: discountType || null,
+        discountValue: discountType ? discountValue : null,
+        items: {
+          create: items.map((i) => ({
+            menuItemOptionId: i.menuItemOptionId,
+            quantity: i.quantity || 1,
+            isBonus: !!i.isBonus,
+          })),
+        },
+      },
+      include: GROUP_INCLUDE,
+    });
+    res.status(201).json(shapeGroup(group));
+  } catch (err) {
+    if (err.code === 'P2002') return res.status(409).json({ error: 'A combo with that name already exists' });
+    if (err.code === 'P2003') return res.status(400).json({ error: 'Selected category or menu item option does not exist' });
+    throw err;
+  }
+});
+
+// PATCH /api/menu/admin/groups/:id — update name/category/description/icon/active/discount
+router.patch('/admin/groups/:id', requireAdmin, async (req, res) => {
+  const { name, categoryId, description, icon, active, discountType, discountValue } = req.body;
+  if (discountType && !['PERCENTAGE', 'FLAT'].includes(discountType)) {
+    return res.status(400).json({ error: 'discountType must be PERCENTAGE or FLAT' });
+  }
+
+  const data = { name, categoryId, description, icon, active };
+  // discountType is only in the payload when the caller means to change the discount —
+  // omitted entirely, discount is left untouched (e.g. an unrelated active-toggle PATCH).
+  if ('discountType' in req.body) {
+    data.discountType = discountType || null;
+    data.discountValue = discountType ? discountValue : null;
+  }
+
+  try {
+    const group = await prisma.menuGroup.update({ where: { id: req.params.id }, data, include: GROUP_INCLUDE });
+    res.json(shapeGroup(group));
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Combo not found' });
+    if (err.code === 'P2003') return res.status(400).json({ error: 'Selected category does not exist' });
+    throw err;
+  }
+});
+
+// DELETE /api/menu/admin/groups/:id — remove a combo entirely
+router.delete('/admin/groups/:id', requireAdmin, async (req, res) => {
+  try {
+    await prisma.menuGroup.delete({ where: { id: req.params.id } });
+    res.status(204).send();
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Combo not found' });
+    if (err.code === 'P2003') {
+      return res.status(409).json({
+        error: 'This combo has already been ordered and can\'t be deleted. Set it inactive instead.',
+      });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Could not delete combo' });
+  }
+});
+
+// POST /api/menu/admin/groups/:id/items — add an included item to a combo
+router.post('/admin/groups/:id/items', requireAdmin, async (req, res) => {
+  const { menuItemOptionId, quantity, isBonus } = req.body;
+  if (!menuItemOptionId) return res.status(400).json({ error: 'menuItemOptionId is required' });
+
+  try {
+    await prisma.menuGroupItem.create({
+      data: { groupId: req.params.id, menuItemOptionId, quantity: quantity || 1, isBonus: !!isBonus },
+    });
+    const group = await prisma.menuGroup.findUnique({ where: { id: req.params.id }, include: GROUP_INCLUDE });
+    res.status(201).json(shapeGroup(group));
+  } catch (err) {
+    if (err.code === 'P2003') return res.status(400).json({ error: 'Selected menu item option does not exist' });
+    throw err;
+  }
+});
+
+// PATCH /api/menu/admin/groups/items/:itemId — update quantity/isBonus on an included item
+router.patch('/admin/groups/items/:itemId', requireAdmin, async (req, res) => {
+  const { quantity, isBonus } = req.body;
+  try {
+    const groupItem = await prisma.menuGroupItem.update({
+      where: { id: req.params.itemId },
+      data: { quantity, isBonus },
+    });
+    const group = await prisma.menuGroup.findUnique({ where: { id: groupItem.groupId }, include: GROUP_INCLUDE });
+    res.json(shapeGroup(group));
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Included item not found' });
+    throw err;
+  }
+});
+
+// DELETE /api/menu/admin/groups/items/:itemId — remove an included item from a combo
+router.delete('/admin/groups/items/:itemId', requireAdmin, async (req, res) => {
+  try {
+    const groupItem = await prisma.menuGroupItem.delete({ where: { id: req.params.itemId } });
+    const group = await prisma.menuGroup.findUnique({ where: { id: groupItem.groupId }, include: GROUP_INCLUDE });
+    res.json(shapeGroup(group));
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Included item not found' });
+    console.error(err);
+    res.status(500).json({ error: 'Could not remove item from combo' });
   }
 });
 
