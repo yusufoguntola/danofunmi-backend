@@ -12,10 +12,13 @@ const reportRoutes = require('./routes/reports');
 const internalRoutes = require('./routes/internal');
 const chatRoutes = require('./routes/chat');
 const feedbackRoutes = require('./routes/feedback');
+const publicFeedbackRoutes = require('./routes/publicFeedback');
 const requestRoutes = require('./routes/requests');
+const { publicRouter: interestRoutes, adminRouter: adminInterestRoutes } = require('./routes/interest');
 const pushRoutes = require('./routes/push');
 const customerRoutes = require('./routes/customer');
 const {apiRateLimit} = require('./middleware/security');
+const {decryptRequest, encryptResponse} = require('./middleware/encryption');
 const {getFrontendOrigins} = require('./lib/frontendOrigins');
 
 const app = express();
@@ -51,8 +54,10 @@ const corsOptions = {
         'Authorization',
         'X-Requested-With',
         'Accept',
-        'Origin'
+        'Origin',
+        'X-Encrypted'
     ],
+    exposedHeaders: ['X-Encrypted'],
     optionsSuccessStatus: 200 // Fixes 204 issue on proxies/older clients
 };
 
@@ -61,6 +66,11 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 app.use(express.json());
+// Decrypt opted-in request bodies and encrypt their responses (no-op unless
+// ENCRYPTION_ENABLED). Must sit after express.json() (the envelope is JSON)
+// and before any route reads req.body or calls res.json.
+app.use(decryptRequest);
+app.use(encryptResponse);
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 app.use('/api', apiRateLimit);
 
@@ -78,12 +88,15 @@ app.get('/api/payment-info', (req, res) => {
 // per-route with requireAdmin inside each router).
 app.use('/api/menu', menuRoutes);
 app.use('/api/locations', locationRoutes);
+app.use('/api/feedback', publicFeedbackRoutes);
+app.use('/api/interest', interestRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin', authRoutes);
 app.use('/api/admin/costs', costRoutes);
 app.use('/api/admin/reports', reportRoutes);
 app.use('/api/admin/feedback', feedbackRoutes);
 app.use('/api/admin/requests', requestRoutes);
+app.use('/api/admin/interest', adminInterestRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/customer', customerRoutes);
 app.use('/api/push', pushRoutes);

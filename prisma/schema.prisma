@@ -261,3 +261,17 @@ model ExtraneousRequest {
 
   customer Customer? @relation(fields: [customerId], references: [id])
 }
+
+// A "register my interest" submission from the coming-soon page — someone who
+// wants to be contacted when ordering opens. `readAt` drives the unread
+// counter on the admin "Interested" tab, mirroring ExtraneousRequest.
+model InterestRegistration {
+  id        String    @id @default(cuid())
+  name      String
+  email     String
+  phone     String
+  address   String
+  excites   String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+}
