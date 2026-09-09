@@ -1,7 +1,10 @@
-// Optional symmetric encryption of JSON API payloads, layered on top of HTTPS
-// (defence in depth / traffic obfuscation). AES-256-GCM with a pre-shared key
-// from the environment. A no-op unless ENCRYPTION_ENABLED is "true", matching
-// this project's pattern for optional features.
+// Optional AES-256-GCM wrapping of JSON API payloads, layered on top of HTTPS.
+// A no-op unless PAYLOAD_OBFUSCATION_ENABLED is "true".
+//
+// This is *obfuscation*, not end-to-end confidentiality: the peer key lives in
+// the frontend bundle (VITE_PAYLOAD_OBFUSCATION_KEY) and is readable by any
+// user, so anyone motivated can decrypt. It only raises the bar against casual
+// on-the-wire inspection. TLS remains the real transport security.
 //
 // Wire format for a payload: base64( iv[12] | ciphertext | authTag[16] ).
 
@@ -12,17 +15,17 @@ const IV_LEN = 12;
 const TAG_LEN = 16;
 
 function isEnabled() {
-  return String(process.env.ENCRYPTION_ENABLED).toLowerCase() === 'true';
+  return String(process.env.PAYLOAD_OBFUSCATION_ENABLED).toLowerCase() === 'true';
 }
 
 let cachedKey;
 function getKey() {
   if (cachedKey) return cachedKey;
-  const raw = (process.env.ENCRYPTION_KEY || '').trim();
+  const raw = (process.env.PAYLOAD_OBFUSCATION_KEY || '').trim();
   // Accept a 64-char hex string or standard base64; both must decode to 32 bytes.
   const buf = /^[0-9a-fA-F]{64}$/.test(raw) ? Buffer.from(raw, 'hex') : Buffer.from(raw, 'base64');
   if (buf.length !== 32) {
-    throw new Error('ENCRYPTION_KEY must decode to 32 bytes (hex or base64) for AES-256-GCM');
+    throw new Error('PAYLOAD_OBFUSCATION_KEY must decode to 32 bytes (hex or base64) for AES-256-GCM');
   }
   cachedKey = buf;
   return buf;

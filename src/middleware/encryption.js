@@ -1,10 +1,12 @@
-// Transparent request/response encryption. When a client sends `X-Encrypted: 1`
-// and the feature is enabled, the request body arrives as an { data: "<b64>" }
-// envelope which we decrypt back into real JSON before any route sees it, and
-// the JSON response goes back out as the same kind of envelope.
+// Transparent request/response payload obfuscation. When a client sends
+// `X-Encrypted: 1` and the feature is enabled, the request body arrives as an
+// { data: "<b64>" } envelope which we unwrap back into real JSON before any
+// route sees it, and the JSON response goes back out as the same kind of
+// envelope. (See payloadCrypto.js — this is obfuscation over TLS, not secrecy.)
 //
 // Clients that don't opt in (curl, health checks, the whatsapp-bot service)
-// are untouched, so turning ENCRYPTION_ENABLED on is backwards-compatible.
+// are untouched, so turning PAYLOAD_OBFUSCATION_ENABLED on is backwards-
+// compatible.
 
 const { isEnabled, encryptString, decryptString } = require('../lib/payloadCrypto');
 

@@ -66,9 +66,9 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 app.use(express.json());
-// Decrypt opted-in request bodies and encrypt their responses (no-op unless
-// ENCRYPTION_ENABLED). Must sit after express.json() (the envelope is JSON)
-// and before any route reads req.body or calls res.json.
+// Unwrap opted-in request bodies and wrap their responses (no-op unless
+// PAYLOAD_OBFUSCATION_ENABLED). Must sit after express.json() (the envelope is
+// JSON) and before any route reads req.body or calls res.json.
 app.use(decryptRequest);
 app.use(encryptResponse);
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
