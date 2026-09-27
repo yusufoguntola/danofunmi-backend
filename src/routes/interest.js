@@ -23,7 +23,9 @@ async function getSlotStatus(client = prisma) {
     update: {},
     create: { id: SETTINGS_ID },
   });
-  const slotsClaimed = await client.interestRegistration.count({ where: { claimedSlot: true } });
+  const slotsClaimed = await client.interestRegistration.count({
+    where: { claimedSlot: true, deletedAt: null },
+  });
   return {
     slotsTotal: settings.firstTasteSlots,
     slotsClaimed,
@@ -90,10 +92,14 @@ publicRouter.post('/', authRateLimit, requireRecaptcha(), async (req, res, next)
       // once claimed, stays claimed even if the person later resubmits via
       // the general form — and `shortlisted` is never touched here at all,
       // it's admin-only.
-      const existing = await tx.interestRegistration.findFirst({ where: { email } });
+      // A soft-deleted registration is invisible here — resubmitting after
+      // admin deleted you starts a fresh row rather than resurrecting it.
+      const existing = await tx.interestRegistration.findFirst({ where: { email, deletedAt: null } });
       let claimed = existing?.claimedSlot ?? false;
       if (wantsSlot && !claimed) {
-        const slotsClaimed = await tx.interestRegistration.count({ where: { claimedSlot: true } });
+        const slotsClaimed = await tx.interestRegistration.count({
+          where: { claimedSlot: true, deletedAt: null },
+        });
         claimed = slotsClaimed < settings.firstTasteSlots;
       }
 
@@ -169,22 +175,27 @@ adminRouter.patch('/settings', async (req, res, next) => {
   }
 });
 
-// GET /api/admin/interest — all registrations, newest first
+// GET /api/admin/interest — all (non-deleted) registrations, newest first
 adminRouter.get('/', async (req, res) => {
-  const rows = await prisma.interestRegistration.findMany({ orderBy: { createdAt: 'desc' } });
-  console.log(rows);
+  const rows = await prisma.interestRegistration.findMany({
+    where: { deletedAt: null },
+    orderBy: { createdAt: 'desc' },
+  });
   res.json(rows);
 });
 
 // GET /api/admin/interest/unread-count — for the admin nav tab badge
 adminRouter.get('/unread-count', async (req, res) => {
-  const count = await prisma.interestRegistration.count({ where: { readAt: null } });
+  const count = await prisma.interestRegistration.count({ where: { readAt: null, deletedAt: null } });
   res.json({ count });
 });
 
 // PATCH /api/admin/interest/read-all — mark every unread registration as read
 adminRouter.patch('/read-all', async (req, res) => {
-  await prisma.interestRegistration.updateMany({ where: { readAt: null }, data: { readAt: new Date() } });
+  await prisma.interestRegistration.updateMany({
+    where: { readAt: null, deletedAt: null },
+    data: { readAt: new Date() },
+  });
   res.json({ ok: true });
 });
 
@@ -197,7 +208,7 @@ adminRouter.patch('/read-all', async (req, res) => {
 adminRouter.post('/send-shortlist-emails', async (req, res, next) => {
   try {
     const pending = await prisma.interestRegistration.findMany({
-      where: { shortlisted: true, finalEmailSentAt: null },
+      where: { shortlisted: true, finalEmailSentAt: null, deletedAt: null },
     });
 
     const results = await Promise.allSettled(
@@ -240,7 +251,7 @@ adminRouter.post('/:id/create-order', async (req, res, next) => {
     }
 
     const registration = await prisma.interestRegistration.findUnique({ where: { id: req.params.id } });
-    if (!registration) return res.status(404).json({ error: 'Registration not found' });
+    if (!registration || registration.deletedAt) return res.status(404).json({ error: 'Registration not found' });
     if (!registration.shortlisted) {
       return res.status(400).json({ error: 'Only shortlisted registrations can be pushed into the ordering flow.' });
     }
@@ -265,10 +276,26 @@ adminRouter.patch('/:id', async (req, res) => {
 
   try {
     const row = await prisma.interestRegistration.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id, deletedAt: null },
       data,
     });
     res.json(row);
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Registration not found' });
+    throw err;
+  }
+});
+
+// DELETE /api/admin/interest/:id — soft-delete: the row stays in the DB (and
+// keeps counting toward historical records) but disappears from every admin
+// list/count/action above and frees up its slot if it had claimed one.
+adminRouter.delete('/:id', async (req, res) => {
+  try {
+    await prisma.interestRegistration.update({
+      where: { id: req.params.id, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    res.json({ ok: true });
   } catch (err) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'Registration not found' });
     throw err;

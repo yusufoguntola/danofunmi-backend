@@ -194,11 +194,12 @@ model PaymentReceipt {
 }
 
 model Feedback {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   orderId   String
   rating    Int
   comment   String?
-  createdAt DateTime @default(now())
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
@@ -257,6 +258,7 @@ model ExtraneousRequest {
   orderNarration String?
   source         OrderSource @default(WEB_CHAT)
   readAt         DateTime?
+  deletedAt      DateTime?
   createdAt      DateTime    @default(now())
 
   customer Customer? @relation(fields: [customerId], references: [id])
@@ -288,6 +290,7 @@ model InterestRegistration {
   finalEmailSentAt DateTime?
   orderId          String?   @unique
   readAt           DateTime?
+  deletedAt        DateTime?
   createdAt        DateTime  @default(now())
 }
 

@@ -16,7 +16,7 @@ function firstName(full) {
 router.get('/', async (req, res, next) => {
   try {
     const rows = await prisma.feedback.findMany({
-      where: { comment: { not: null } },
+      where: { comment: { not: null }, deletedAt: null },
       orderBy: { createdAt: 'desc' },
       take: 30,
       include: { order: { select: { customer: { select: { name: true } } } } },
