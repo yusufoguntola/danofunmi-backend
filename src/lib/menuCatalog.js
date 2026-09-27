@@ -1,5 +1,12 @@
 const prisma = require('../db');
 
+// Categories that exist for internal/admin-triggered orders only (e.g. the
+// free "First Taste" item created for shortlisted interest registrations,
+// see lib/firstTaste.js) and must never appear in the public catalog or the
+// AI ordering chat's menu awareness — customers can't add them to a cart
+// themselves.
+const HIDDEN_CATEGORIES = ['Promotions'];
+
 /** Discount amount for a group given its gross (pre-discount) total, clamped to [0, gross]. */
 function computeDiscountAmount(group, gross) {
   if (!group.discountType || group.discountValue == null) return 0;
@@ -48,7 +55,7 @@ function shapeGroup(group) {
 /** Active menu items, catalog-shaped with an explicit `type: 'item'`. */
 async function listActiveItems() {
   const items = await prisma.menuItem.findMany({
-    where: { active: true },
+    where: { active: true, category: { name: { notIn: HIDDEN_CATEGORIES } } },
     orderBy: { createdAt: 'asc' },
     include: {
       category: true,
@@ -69,7 +76,7 @@ async function listActiveItems() {
 /** Active menu groups (combos), catalog-shaped with computed totals. */
 async function listActiveGroups() {
   const groups = await prisma.menuGroup.findMany({
-    where: { active: true },
+    where: { active: true, category: { name: { notIn: HIDDEN_CATEGORIES } } },
     orderBy: { createdAt: 'asc' },
     include: {
       category: true,
@@ -85,4 +92,4 @@ async function getCatalog() {
   return [...items, ...groups];
 }
 
-module.exports = { getCatalog, listActiveItems, listActiveGroups, shapeGroup, computeDiscountAmount };
+module.exports = { getCatalog, listActiveItems, listActiveGroups, shapeGroup, computeDiscountAmount, HIDDEN_CATEGORIES };

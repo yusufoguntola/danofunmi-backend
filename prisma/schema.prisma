@@ -265,13 +265,37 @@ model ExtraneousRequest {
 // A "register my interest" submission from the coming-soon page — someone who
 // wants to be contacted when ordering opens. `readAt` drives the unread
 // counter on the admin "Interested" tab, mirroring ExtraneousRequest.
+// `claimedSlot` is true when this submission actually claimed one of the
+// limited "first taste" slots (see LaunchSettings) rather than just joining
+// the general waitlist; `landmark` is only collected on a slot claim.
+// `shortlisted` is an admin-only pick of who actually makes the final
+// first-taste list; `finalEmailSentAt` tracks whether they've been sent the
+// "you made the list" email so the admin bulk-send doesn't double-email.
+// `orderId` is set once admin has pushed a shortlisted person into the
+// standard ordering flow (a free "First Taste" order, see lib/firstTaste.js)
+// — a plain id reference rather than a formal relation, same lightweight
+// pattern as ExtraneousRequest.orderNarration below.
 model InterestRegistration {
-  id        String    @id @default(cuid())
-  name      String
-  email     String
-  phone     String
-  address   String
-  excites   String?
-  readAt    DateTime?
-  createdAt DateTime  @default(now())
+  id               String    @id @default(cuid())
+  name             String
+  email            String
+  phone            String
+  address          String
+  landmark         String?
+  excites          String?
+  claimedSlot      Boolean   @default(false)
+  shortlisted      Boolean   @default(false)
+  finalEmailSentAt DateTime?
+  orderId          String?   @unique
+  readAt           DateTime?
+  createdAt        DateTime  @default(now())
+}
+
+// Singleton row (id is always "singleton") holding admin-configurable
+// pre-launch settings. Currently just the number of "first taste" slots on
+// offer; InterestRegistration rows with claimedSlot = true count against it.
+model LaunchSettings {
+  id              String   @id @default("singleton")
+  firstTasteSlots Int      @default(20)
+  updatedAt       DateTime @updatedAt
 }

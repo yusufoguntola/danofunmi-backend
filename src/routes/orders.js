@@ -5,7 +5,7 @@ const { orderLookupRateLimit, requireBrowserOrigin } = require('../middleware/se
 const { requireRecaptcha } = require('../lib/recaptcha');
 const { uploadReceipt } = require('../lib/uploads');
 const { createOrderRecord, OrderValidationError } = require('../lib/orderCreation');
-const { sendPushToPhone } = require('../lib/push');
+const { notifyOrderStatusChange } = require('../lib/orderNotifications');
 
 const router = express.Router();
 
@@ -134,11 +134,7 @@ router.patch('/admin/:id/status', requireAdmin, async (req, res) => {
     include: orderIncludes,
   });
 
-  sendPushToPhone(order.customer.phone, {
-    title: `Order ${order.narration}`,
-    body: `Now ${status.replaceAll('_', ' ')}`,
-    url: `/order/${order.id}`,
-  }).catch((err) => console.error('sendPushToPhone failed:', err));
+  notifyOrderStatusChange(order);
 
   res.json(order);
 });
@@ -164,17 +160,15 @@ router.patch('/admin/:id/receipts/:receiptId', requireAdmin, async (req, res) =>
 
   const order = await prisma.order.findUnique({
     where: { id: req.params.id },
-    include: { customer: true },
+    include: orderIncludes,
   });
   if (order) {
-    sendPushToPhone(order.customer.phone, {
-      title: `Order ${order.narration}`,
+    notifyOrderStatusChange(order, {
       body:
         status === 'CONFIRMED'
           ? 'Payment confirmed!'
           : "Your receipt couldn't be verified — please upload a clearer copy.",
-      url: `/order/${order.id}`,
-    }).catch((err) => console.error('sendPushToPhone failed:', err));
+    });
   }
 
   res.json(receipt);
