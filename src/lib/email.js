@@ -33,10 +33,21 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// The site's public origin, for building absolute URLs email clients can
+// actually fetch (a bare path won't resolve for someone reading in their
+// inbox). Falls back to the production domain if FRONTEND_ORIGIN isn't set
+// — always used for the logo below.
+function siteOrigin() {
+  return getFrontendOrigins()[0] || 'https://danofunmi.com';
+}
+
 // Same green/terracotta/cream palette as the frontend (frontend/src/index.css)
 // and the status-card mockups — inlined and table-based since email clients
 // don't load stylesheets or Google Fonts reliably. Shared by every email this
-// module sends; `heading`/`bodyHtml` are the only parts that vary.
+// module sends; `heading`/`bodyHtml` are the only parts that vary. The logo
+// is the same PWA icon (LogoMark's "Concept C" cooking-pot) served from the
+// frontend's public/icons — real image, not a placeholder emoji, so it
+// renders in email clients that don't load Google Fonts or emoji glyphs.
 function emailShell({ title, heading, bodyHtml }) {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -46,7 +57,7 @@ function emailShell({ title, heading, bodyHtml }) {
     <tr><td align="center">
       <table role="presentation" width="100%" style="max-width:520px;background:#16321f;border-radius:20px;overflow:hidden;">
         <tr><td style="padding:40px 36px 28px;text-align:center;">
-          <div style="width:64px;height:64px;border-radius:50%;background:#1d4429;margin:0 auto 18px;line-height:64px;font-size:28px;">🍲</div>
+          <img src="${siteOrigin()}/icons/icon-192.png" width="64" height="64" alt="dánọ́fúnmi" style="display:block;width:64px;height:64px;margin:0 auto 18px;border-radius:50%;" />
           <div style="font-style:italic;font-weight:700;font-size:28px;color:#faf6ec;letter-spacing:0.01em;">dánọ́fúnmi</div>
           <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:rgba(250,246,236,0.75);margin-top:6px;">You choose, we cook.</div>
         </td></tr>
