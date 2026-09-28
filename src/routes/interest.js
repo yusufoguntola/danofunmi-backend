@@ -266,13 +266,18 @@ adminRouter.post('/:id/create-order', async (req, res, next) => {
   }
 });
 
-// PATCH /api/admin/interest/:id — mark a single registration read/unread
-// and/or shortlisted (only the keys present in the body are touched).
+// PATCH /api/admin/interest/:id — mark a single registration read/unread,
+// shortlisted, and/or claimedSlot (only the keys present in the body are
+// touched). Admin can move someone to/from "First taste" by hand here —
+// deliberately no cap against the configured slot total, since this is a
+// manual override; GET /status's slotsClaimed count reflects the change
+// immediately either way (it just counts claimedSlot: true rows).
 adminRouter.patch('/:id', async (req, res) => {
-  const { read, shortlisted } = req.body;
+  const { read, shortlisted, claimedSlot } = req.body;
   const data = {};
   if (read !== undefined) data.readAt = read === false ? null : new Date();
   if (shortlisted !== undefined) data.shortlisted = !!shortlisted;
+  if (claimedSlot !== undefined) data.claimedSlot = !!claimedSlot;
 
   try {
     const row = await prisma.interestRegistration.update({
