@@ -210,6 +210,7 @@ async function createOrderRecord({
           total,
           source,
           notes,
+          statusUpdatedAt: new Date(),
           items: { create: lineItems },
         },
         include: { items: true, location: true, customer: true },

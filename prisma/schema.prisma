@@ -147,6 +147,11 @@ model Order {
   logisticsFee     Decimal     @db.Decimal(10, 2)
   total            Decimal     @db.Decimal(10, 2)
   status           OrderStatus @default(PENDING_PAYMENT)
+  // Set every time `status` changes (see routes/orders.js) — distinct from
+  // `updatedAt`, which also moves on unrelated edits (rider contact,
+  // delivery location) and would otherwise misrepresent those as a status
+  // change in the admin orders table.
+  statusUpdatedAt  DateTime?
   source           OrderSource @default(WEB)
   notes            String?
   // Set (optionally) alongside the PACKED -> OUT_FOR_DELIVERY status move —
@@ -207,14 +212,22 @@ model PaymentReceipt {
 }
 
 model Feedback {
-  id        String    @id @default(cuid())
-  orderId   String
-  rating    Int
-  comment   String?
-  deletedAt DateTime?
-  createdAt DateTime  @default(now())
+  id      String @id @default(cuid())
+  // Null for "generic" feedback — submitted from the standalone /feedback
+  // link (see routes/publicFeedback.js's POST /general) rather than about a
+  // specific delivered order. customerName/location/foodType below are only
+  // ever populated on that path — an order-linked feedback row gets those
+  // details from `order.customer`/`order.location`/`order.items` instead.
+  orderId      String?
+  rating       Int
+  comment      String?
+  customerName String?
+  location     String?
+  foodType     String?
+  deletedAt    DateTime?
+  createdAt    DateTime  @default(now())
 
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
 
 model PushSubscription {

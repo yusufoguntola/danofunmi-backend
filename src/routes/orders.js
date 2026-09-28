@@ -83,7 +83,7 @@ router.post('/:id/receipt', uploadReceipt.single('receipt'), async (req, res) =>
     prisma.paymentReceipt.create({ data: receiptData }),
     prisma.order.update({
       where: { id: order.id },
-      data: { status: 'PAYMENT_SUBMITTED' },
+      data: { status: 'PAYMENT_SUBMITTED', statusUpdatedAt: new Date() },
     }),
   ]);
 
@@ -124,9 +124,10 @@ router.patch('/admin/:id/status', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Invalid status' });
   }
 
-  const data = { status };
+  const now = new Date();
+  const data = { status, statusUpdatedAt: now };
   const timestampField = STATUS_TIMESTAMP_FIELD[status];
-  if (timestampField) data[timestampField] = new Date();
+  if (timestampField) data[timestampField] = now;
   // Optional, only meaningful alongside the move to OUT_FOR_DELIVERY — but
   // accepted whenever sent so admin can also correct it later via the same
   // endpoint (e.g. a status re-save) without a dedicated route.
@@ -196,7 +197,7 @@ router.patch('/admin/:id/receipts/:receiptId', requireAdmin, async (req, res) =>
   if (status === 'CONFIRMED') {
     await prisma.order.update({
       where: { id: req.params.id },
-      data: { status: 'CONFIRMED' },
+      data: { status: 'CONFIRMED', statusUpdatedAt: new Date() },
     });
   }
 

@@ -108,7 +108,7 @@ async function createFirstTasteOrder(registration, locationId) {
   // standard packed / out-for-delivery / delivered pipeline.
   order = await prisma.order.update({
     where: { id: order.id },
-    data: { status: 'CONFIRMED' },
+    data: { status: 'CONFIRMED', statusUpdatedAt: new Date() },
     include: { customer: true, location: true, items: true, receipts: true },
   });
 

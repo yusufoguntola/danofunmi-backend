@@ -14,7 +14,8 @@
     "admin:create": "node scripts/create-admin.js",
     "admin:reset-password": "node scripts/reset-admin-password.js",
     "interest:create-customers": "node scripts/create-customers-from-interest.js",
-    "interest:create-orders": "node scripts/create-orders-from-shortlist.js"
+    "interest:create-orders": "node scripts/create-orders-from-shortlist.js",
+    "order:set-status": "node scripts/set-order-status.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

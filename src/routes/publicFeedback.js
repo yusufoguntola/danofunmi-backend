@@ -1,6 +1,7 @@
 const express = require('express');
 const prisma = require('../db');
-const { orderLookupRateLimit, requireBrowserOrigin } = require('../middleware/security');
+const { authRateLimit, orderLookupRateLimit, requireBrowserOrigin } = require('../middleware/security');
+const { requireRecaptcha } = require('../lib/recaptcha');
 
 const router = express.Router();
 
@@ -8,6 +9,10 @@ function orderLookupWhere(idOrNarration) {
   const or = [{ id: idOrNarration }, { narration: idOrNarration }];
   if (/^\d+$/.test(idOrNarration)) or.push({ orderNumber: Number(idOrNarration) });
   return { OR: or };
+}
+
+function clean(value, max) {
+  return String(value ?? '').trim().slice(0, max);
 }
 
 // Only the customer's first name is ever exposed here — never contact details.
@@ -37,7 +42,7 @@ router.get('/', async (req, res, next) => {
         rating: f.rating,
         comment: f.comment.trim(),
         createdAt: f.createdAt,
-        name: firstName(f.order?.customer?.name),
+        name: firstName(f.order?.customer?.name || f.customerName),
       }));
 
     res.json(items);
@@ -110,6 +115,37 @@ router.post('/order/:idOrNarration', orderLookupRateLimit, requireBrowserOrigin,
 
     const feedback = await prisma.feedback.create({ data: { orderId: order.id, rating, comment } });
     res.status(201).json({ rating: feedback.rating, comment: feedback.comment, createdAt: feedback.createdAt });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/feedback/general — public, feedback that isn't about a specific
+// order — reached via the standalone /feedback link (shared manually, or
+// linked from the landing page — see SiteFooter.jsx), not the per-order
+// /feedback/:id page linked from the delivery email. Everything but the
+// rating is optional and free text — there's no order to pull a name/
+// location/items from, so the customer can volunteer their own. More open
+// to spam than the order-scoped endpoint (no order to check against), hence
+// the rate limit + reCAPTCHA also used by the "I'm interested" form.
+router.post('/general', authRateLimit, requireBrowserOrigin, requireRecaptcha(), async (req, res, next) => {
+  try {
+    const rating = Number(req.body.rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      return res.status(400).json({ error: 'Rating must be a whole number from 1 to 5.' });
+    }
+
+    const feedback = await prisma.feedback.create({
+      data: {
+        orderId: null,
+        rating,
+        comment: clean(req.body.comment, 1000) || null,
+        customerName: clean(req.body.customerName, 120) || null,
+        location: clean(req.body.location, 120) || null,
+        foodType: clean(req.body.foodType, 200) || null,
+      },
+    });
+    res.status(201).json({ id: feedback.id, rating: feedback.rating, comment: feedback.comment, createdAt: feedback.createdAt });
   } catch (err) {
     next(err);
   }
