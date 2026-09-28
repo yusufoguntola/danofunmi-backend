@@ -110,7 +110,7 @@ const STATUS_TIMESTAMP_FIELD = {
 };
 
 router.patch('/admin/:id/status', requireAdmin, async (req, res) => {
-  const { status } = req.body;
+  const { status, riderContact } = req.body;
   const valid = [
     'PENDING_PAYMENT',
     'PAYMENT_SUBMITTED',
@@ -127,6 +127,10 @@ router.patch('/admin/:id/status', requireAdmin, async (req, res) => {
   const data = { status };
   const timestampField = STATUS_TIMESTAMP_FIELD[status];
   if (timestampField) data[timestampField] = new Date();
+  // Optional, only meaningful alongside the move to OUT_FOR_DELIVERY — but
+  // accepted whenever sent so admin can also correct it later via the same
+  // endpoint (e.g. a status re-save) without a dedicated route.
+  if (riderContact !== undefined) data.riderContact = riderContact ? String(riderContact).trim() || null : null;
 
   const order = await prisma.order.update({
     where: { id: req.params.id },

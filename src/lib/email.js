@@ -151,9 +151,14 @@ function orderStatusEmailHtml(order) {
   const label = STATUS_LABELS[order.status] || order.status;
   const message = STATUS_MESSAGES[order.status] || `Your order status is now &ldquo;${label}&rdquo;.`;
   const origin = getFrontendOrigins()[0];
-  const trackingLink = origin
-    ? `<p style="margin:0 0 22px;"><a href="${origin}/order/${order.id}" style="color:#c4652f;font-weight:700;text-decoration:none;">Track your order &rarr;</a></p>`
-    : '';
+  // Once delivered, the useful next step is feedback rather than tracking
+  // (the status is final) — so the CTA switches over instead of stacking
+  // both links.
+  const ctaLink = !origin
+    ? ''
+    : order.status === 'DELIVERED'
+      ? `<p style="margin:0 0 22px;"><a href="${origin}/feedback/${order.id}" style="color:#c4652f;font-weight:700;text-decoration:none;">Leave feedback &rarr;</a></p>`
+      : `<p style="margin:0 0 22px;"><a href="${origin}/order/${order.id}" style="color:#c4652f;font-weight:700;text-decoration:none;">Track your order &rarr;</a></p>`;
   const itemRows = (order.items || [])
     .map(
       (item) =>
@@ -177,7 +182,7 @@ function orderStatusEmailHtml(order) {
           </table>
         </td></tr>
       </table>
-      ${trackingLink}
+      ${ctaLink}
     `,
   });
 }

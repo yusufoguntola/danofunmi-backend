@@ -149,6 +149,10 @@ model Order {
   status           OrderStatus @default(PENDING_PAYMENT)
   source           OrderSource @default(WEB)
   notes            String?
+  // Set (optionally) alongside the PACKED -> OUT_FOR_DELIVERY status move —
+  // whoever's carrying the order, however admin wants to note them (name,
+  // phone, both). Free text, never required.
+  riderContact     String?
   packedAt         DateTime?
   outForDeliveryAt DateTime?
   deliveredAt      DateTime?
