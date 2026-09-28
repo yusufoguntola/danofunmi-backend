@@ -58,6 +58,13 @@ Responsibilities, roughly in order:
    log_special_request so the team can follow up directly. Tell them it's been noted for the team
    but never promise it'll be granted, and never invent a price or discount yourself. Make sure to get the
    name and contact phone number of the customer in this case (if the customer is not already authenticated)
+10. If the customer explicitly asks to speak to a person/human/agent, or you genuinely can't help
+    with what they need (e.g. an urgent change to an order already being prepared, a complaint,
+    or anything outside what your tools cover), call request_human_handoff — this puts a "Chat on
+    WhatsApp" button in front of them that opens WhatsApp directly. Don't call it for things you
+    can actually do yourself (ordering, tracking, feedback, logging a special request) — only when
+    a real person genuinely needs to take over. Let them know in your reply that you've put a
+    WhatsApp button up for them.
 
 Keep replies short and warm — this is a chat interface, not an email. If a tool call fails,
 explain the problem in plain language and help the customer fix it (e.g. an invalid location or
@@ -152,6 +159,18 @@ const TOOLS = [
         orderNarration: { type: 'string', description: 'If this is about an existing/in-progress order, its narration or order number.' },
       },
       required: ['requestType', 'message'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'request_human_handoff',
+    description: 'Surfaces a "Chat on WhatsApp" button in the app so the customer can reach a real person directly — call when they explicitly ask for a human, or when the situation is genuinely beyond what your other tools can do. This doesn\'t message anyone itself.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', description: 'Brief plain-language reason for the handoff — used to pre-fill their WhatsApp message.' },
+      },
+      required: ['reason'],
       additionalProperties: false,
     },
   },
@@ -289,6 +308,13 @@ async function toolLogSpecialRequest({ requestType, message, customerName, custo
   return { ok: true };
 }
 
+// Nothing to persist — this tool exists purely to signal the frontend (via
+// extractMeta below) to show a WhatsApp handoff button. The actual human
+// contact happens over WhatsApp itself, outside this app.
+async function toolRequestHumanHandoff({ reason }) {
+  return { ok: true, reason };
+}
+
 const HANDLERS = {
   list_menu: toolListMenu,
   list_locations: toolListLocations,
@@ -297,6 +323,7 @@ const HANDLERS = {
   track_order: toolTrackOrder,
   submit_feedback: toolSubmitFeedback,
   log_special_request: toolLogSpecialRequest,
+  request_human_handoff: toolRequestHumanHandoff,
 };
 
 async function executeTool(name, input, context) {
@@ -315,13 +342,15 @@ async function executeTool(name, input, context) {
 }
 
 /**
- * Extracts the last create_order/track_order and update_cart tool results from
- * this turn's new content, for the frontend — order info under the returned
- * object's top level (unchanged shape), cart info under `.cart`.
+ * Extracts the last create_order/track_order, update_cart, and
+ * request_human_handoff tool results from this turn's new content, for the
+ * frontend — order info under the returned object's top level (unchanged
+ * shape), cart info under `.cart`, handoff info under `.humanHandoff`.
  */
 function extractMeta(newAssistantBlocks, toolResultsByCallId) {
   let orderMeta = null;
   let cartMeta = null;
+  let humanHandoffMeta = null;
 
   for (const block of newAssistantBlocks) {
     if (block.type !== 'tool_use') continue;
@@ -347,11 +376,13 @@ function extractMeta(newAssistantBlocks, toolResultsByCallId) {
       };
     } else if (block.name === 'update_cart') {
       cartMeta = { items: parsed.items, subtotal: parsed.subtotal };
+    } else if (block.name === 'request_human_handoff') {
+      humanHandoffMeta = { reason: parsed.reason };
     }
   }
 
-  if (!orderMeta && !cartMeta) return null;
-  return { ...orderMeta, cart: cartMeta };
+  if (!orderMeta && !cartMeta && !humanHandoffMeta) return null;
+  return { ...orderMeta, cart: cartMeta, humanHandoff: humanHandoffMeta };
 }
 
 /**
