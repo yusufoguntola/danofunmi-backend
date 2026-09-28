@@ -139,6 +139,44 @@ router.patch('/admin/:id/status', requireAdmin, async (req, res) => {
   res.json(order);
 });
 
+// PATCH /api/admin/orders/:id/location — admin correcting the delivery
+// location on an order (e.g. one picked hastily when creating a first-taste
+// order — see lib/firstTaste.js). Recomputes logisticsFee/total from the new
+// location; item lines and subtotal are untouched. Blocked once the order is
+// DELIVERED or CANCELLED — by then the fee has already counted toward
+// revenue (see reports.js's REVENUE_STATUSES) and shouldn't be rewritten
+// after the fact.
+router.patch('/admin/:id/location', requireAdmin, async (req, res, next) => {
+  try {
+    const { locationId } = req.body;
+    if (!locationId) return res.status(400).json({ error: 'locationId is required.' });
+
+    const existing = await prisma.order.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Order not found' });
+    if (['DELIVERED', 'CANCELLED'].includes(existing.status)) {
+      return res.status(400).json({ error: 'Cannot change the location of a delivered or cancelled order.' });
+    }
+
+    const location = await prisma.location.findUnique({ where: { id: locationId } });
+    if (!location || !location.active) {
+      return res.status(400).json({ error: 'Selected location is not available' });
+    }
+
+    const logisticsFee = Number(location.logisticsFee);
+    const total = Number(existing.subtotal) + logisticsFee;
+
+    const order = await prisma.order.update({
+      where: { id: req.params.id },
+      data: { locationId, logisticsFee, total },
+      include: orderIncludes,
+    });
+
+    res.json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // PATCH /api/admin/orders/:id/receipts/:receiptId — confirm/reject a receipt
 router.patch('/admin/:id/receipts/:receiptId', requireAdmin, async (req, res) => {
   const { status } = req.body;

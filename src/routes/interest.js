@@ -283,15 +283,24 @@ adminRouter.post('/:id/create-order', async (req, res, next) => {
 // deliberately no cap against the configured slot total, since this is a
 // manual override; GET /status's slotsClaimed count reflects the change
 // immediately either way (it just counts claimedSlot: true rows).
-adminRouter.patch('/:id', async (req, res) => {
-  const { read, shortlisted, claimedSlot } = req.body;
+//
+// Setting shortlisted: true together with a `locationId` pushes the
+// registration straight into the ordering flow in the same request — the
+// free, pre-confirmed "First Taste" order (see lib/firstTaste.js) — rather
+// than leaving that as a separate step admin has to remember. `locationId`
+// still has to be chosen by hand (it sets the delivery fee and the
+// landmark/address is free text, never auto-guessed) — omitting it just
+// shortlists without creating an order, same as before this existed, and
+// the order can still be created later via POST /:id/create-order.
+adminRouter.patch('/:id', async (req, res, next) => {
+  const { read, shortlisted, claimedSlot, locationId } = req.body;
   const data = {};
   if (read !== undefined) data.readAt = read === false ? null : new Date();
   if (shortlisted !== undefined) data.shortlisted = !!shortlisted;
   if (claimedSlot !== undefined) data.claimedSlot = !!claimedSlot;
 
   try {
-    const row = await prisma.interestRegistration.update({
+    let row = await prisma.interestRegistration.update({
       where: { id: req.params.id, deletedAt: null },
       data,
     });
@@ -306,10 +315,23 @@ adminRouter.patch('/:id', async (req, res) => {
       }
     }
 
-    res.json(row);
+    let order = null;
+    if (data.shortlisted && !row.orderId && locationId) {
+      try {
+        order = await createFirstTasteOrder(row, locationId);
+        row = { ...row, orderId: order.id };
+      } catch (err) {
+        if (err instanceof OrderValidationError) {
+          return res.status(400).json({ error: err.message });
+        }
+        throw err;
+      }
+    }
+
+    res.json(order ? { ...row, order } : row);
   } catch (err) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'Registration not found' });
-    throw err;
+    next(err);
   }
 });
 
