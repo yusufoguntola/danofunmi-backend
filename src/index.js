@@ -17,6 +17,8 @@ const requestRoutes = require('./routes/requests');
 const { publicRouter: interestRoutes, adminRouter: adminInterestRoutes } = require('./routes/interest');
 const pushRoutes = require('./routes/push');
 const customerRoutes = require('./routes/customer');
+const adminCustomerRoutes = require('./routes/adminCustomers');
+const broadcastRoutes = require('./routes/broadcast');
 const {apiRateLimit} = require('./middleware/security');
 const {decryptRequest, encryptResponse} = require('./middleware/encryption');
 const {getFrontendOrigins} = require('./lib/frontendOrigins');
@@ -99,6 +101,8 @@ app.use('/api/admin/requests', requestRoutes);
 app.use('/api/admin/interest', adminInterestRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/customer', customerRoutes);
+app.use('/api/admin/customers', adminCustomerRoutes);
+app.use('/api/admin/broadcast', broadcastRoutes);
 app.use('/api/push', pushRoutes);
 
 // Internal-only, used by the whatsapp-bot service

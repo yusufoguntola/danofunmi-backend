@@ -182,6 +182,18 @@ function orderStatusEmailHtml(order) {
   });
 }
 
+// Admin's free-text "send a broadcast" announcement (new menu, monthly
+// ordering reminder, ...) — see routes/broadcast.js. `body` is admin-typed
+// plain text, so it's escaped and line breaks preserved rather than treated
+// as HTML.
+function broadcastEmailHtml({ title, body }) {
+  return emailShell({
+    title,
+    heading: title,
+    bodyHtml: `<p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:#33443a;white-space:pre-wrap;">${escapeHtml(body)}</p>`,
+  });
+}
+
 /** Best-effort — callers should catch and log rather than fail the request
  * over a delivery problem. A no-op (with a console notice) if ZOHO_API_KEY
  * isn't set. */
@@ -233,9 +245,26 @@ async function sendOrderStatusEmail(order) {
   });
 }
 
+/** Same best-effort/graceful-absence contract as above. Sent by the admin
+ * multi-channel broadcast tool (routes/broadcast.js) to every customer with
+ * an email on file. */
+async function sendBroadcastEmail({ to, name, title, body }) {
+  if (!isConfigured()) {
+    console.log(`[email] ZOHO_API_KEY not set — skipping broadcast email to ${to}`);
+    return;
+  }
+  await getClient().sendMail({
+    from: fromAddress(),
+    to: [{ email_address: { address: to, name: name || '' } }],
+    subject: title,
+    htmlbody: broadcastEmailHtml({ title, body }),
+  });
+}
+
 module.exports = {
   isConfigured,
   sendFirstTasteConfirmationEmail,
   sendShortlistConfirmationEmail,
   sendOrderStatusEmail,
+  sendBroadcastEmail,
 };

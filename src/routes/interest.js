@@ -4,7 +4,7 @@ const { requireAdmin } = require('../middleware/auth');
 const { authRateLimit, requireBrowserOrigin } = require('../middleware/security');
 const { requireRecaptcha } = require('../lib/recaptcha');
 const { sendFirstTasteConfirmationEmail, sendShortlistConfirmationEmail } = require('../lib/email');
-const { createFirstTasteOrder } = require('../lib/firstTaste');
+const { createFirstTasteOrder, ensureCustomerForFirstTaste } = require('../lib/firstTaste');
 const { OrderValidationError } = require('../lib/orderCreation');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -132,6 +132,17 @@ publicRouter.post('/', authRateLimit, requireRecaptcha(), async (req, res, next)
         await sendFirstTasteConfirmationEmail({ to: email, name, claimedSlot, landmark });
       } catch (err) {
         console.error('Failed to send first-taste confirmation email:', err);
+      }
+    }
+
+    // Anyone who actually claimed a first-taste slot becomes a real Customer
+    // right away — not just a row on this list — so they already exist in
+    // the system by the time admin gets to shortlisting/ordering for them.
+    if (claimedSlot) {
+      try {
+        await ensureCustomerForFirstTaste({ name, phone, email, address, landmark });
+      } catch (err) {
+        console.error('Failed to create customer for first-taste registration:', err);
       }
     }
 
@@ -284,6 +295,17 @@ adminRouter.patch('/:id', async (req, res) => {
       where: { id: req.params.id, deletedAt: null },
       data,
     });
+
+    // Same as the public submission path — admin manually moving someone
+    // into "First taste" also registers them as a real Customer.
+    if (data.claimedSlot) {
+      try {
+        await ensureCustomerForFirstTaste(row);
+      } catch (err) {
+        console.error('Failed to create customer for first-taste registration:', err);
+      }
+    }
+
     res.json(row);
   } catch (err) {
     if (err.code === 'P2025') return res.status(404).json({ error: 'Registration not found' });

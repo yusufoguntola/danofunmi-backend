@@ -25,7 +25,7 @@ function signCustomerToken(customer) {
 }
 
 function publicCustomer(customer) {
-  return { id: customer.id, name: customer.name, email: customer.email, phone: customer.phone };
+  return { id: customer.id, name: customer.name, email: customer.email, phone: customer.phone, address: customer.address };
 }
 
 // POST /api/customer/signup — no email/phone verification, per product decision
@@ -121,6 +121,17 @@ router.post('/google', authRateLimit, async (req, res) => {
   }
 
   res.json({ token: signCustomerToken(customer), customer: publicCustomer(customer) });
+});
+
+// GET /api/customer/me — the signed-in account's current public profile.
+// Name/phone/address can change after the token was issued (e.g. phone or
+// address backfilled by placing an order — see lib/orderCreation.js), and
+// the frontend session is cached in localStorage, so it calls this to catch
+// up rather than requiring a fresh login to see its own latest details.
+router.get('/me', requireCustomer, async (req, res) => {
+  const customer = await prisma.customer.findUnique({ where: { id: req.customer.id } });
+  if (!customer) return res.status(404).json({ error: 'Account not found' });
+  res.json(publicCustomer(customer));
 });
 
 // GET /api/customer/orders — this device's signed-in account's order history

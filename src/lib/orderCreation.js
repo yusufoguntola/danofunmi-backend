@@ -132,6 +132,7 @@ async function createOrderRecord({
   customerName,
   customerPhone,
   deliveryAddress,
+  landmark,
   locationId,
   items,
   source,
@@ -176,6 +177,19 @@ async function createOrderRecord({
     });
   }
 
+  // Unlike name/phone above, delivery address and landmark have no identity
+  // purpose — pure convenience — so they're kept in sync with whatever was
+  // just used, letting them pre-fill next order (see OrderPage.jsx).
+  // Address is required on every order, so it's always synced; landmark is
+  // optional, so an order placed without one leaves a previously-saved
+  // landmark alone rather than clearing it.
+  const customerPatch = {};
+  if (customer.address !== deliveryAddress) customerPatch.address = deliveryAddress;
+  if (landmark && customer.landmark !== landmark) customerPatch.landmark = landmark;
+  if (Object.keys(customerPatch).length) {
+    customer = await prisma.customer.update({ where: { id: customer.id }, data: customerPatch });
+  }
+
   // Narration/order-number collisions are rare (6-char narration from a 32-char
   // alphabet; 1-in-900,000 for the order number) but retry defensively — a
   // P2002 could come from either unique constraint, so just regenerate both.
@@ -190,6 +204,7 @@ async function createOrderRecord({
           customerId: customer.id,
           locationId,
           deliveryAddress,
+          landmark: landmark || null,
           subtotal,
           logisticsFee,
           total,

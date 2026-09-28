@@ -43,6 +43,44 @@ async function ensureFirstTasteMenuOption() {
 }
 
 /**
+ * Creates (or backfills) the Customer record for someone who registered
+ * interest in a first-taste slot — independent of whether/when an order is
+ * ever created for them (see createFirstTasteOrder below, which calls this
+ * too). Conservative like the phone backfill in orderCreation.js: only
+ * fills in fields that are still empty, never overwrites an existing
+ * customer's real account details with older interest-form values.
+ */
+async function ensureCustomerForFirstTaste(registration) {
+  const { name, phone, email, address, landmark } = registration;
+  if (!phone) return null;
+
+  let customer = await prisma.customer.findUnique({ where: { phone } });
+  if (!customer) {
+    customer = await prisma.customer.create({ data: { name, phone, address, landmark } });
+  }
+
+  const patch = {};
+  if (!customer.address && address) patch.address = address;
+  if (!customer.landmark && landmark) patch.landmark = landmark;
+  if (Object.keys(patch).length) {
+    customer = await prisma.customer.update({ where: { id: customer.id }, data: patch });
+  }
+
+  // Email has its own unique constraint and could collide with an unrelated
+  // existing account — skip rather than fail, same pattern as phone/email
+  // elsewhere in this file and in orderCreation.js.
+  if (!customer.email && email) {
+    try {
+      customer = await prisma.customer.update({ where: { id: customer.id }, data: { email } });
+    } catch (err) {
+      if (err.code !== 'P2002') throw err;
+    }
+  }
+
+  return customer;
+}
+
+/**
  * Creates the free order for a shortlisted InterestRegistration and marks it
  * CONFIRMED (skipping the payment steps — there's nothing to pay). Throws
  * OrderValidationError if `registration.orderId` is already set (one order
@@ -54,14 +92,12 @@ async function createFirstTasteOrder(registration, locationId) {
   }
 
   const optionId = await ensureFirstTasteMenuOption();
-  const deliveryAddress = registration.landmark
-    ? `${registration.address} — near ${registration.landmark}`
-    : registration.address;
 
   let order = await createOrderRecord({
     customerName: registration.name,
     customerPhone: registration.phone,
-    deliveryAddress,
+    deliveryAddress: registration.address,
+    landmark: registration.landmark,
     locationId,
     items: [{ menuItemOptionId: optionId, quantity: 1 }],
     source: 'WEB',
@@ -77,22 +113,11 @@ async function createFirstTasteOrder(registration, locationId) {
   });
 
   // The order's customer record is found-or-created by phone (see
-  // createOrderRecord) and may not have an email yet — backfill it from the
-  // registration so future order-status emails actually reach them. Same
-  // "skip on conflict" pattern createOrderRecord itself uses for phone.
-  if (!order.customer.email) {
-    try {
-      order = {
-        ...order,
-        customer: await prisma.customer.update({
-          where: { id: order.customer.id },
-          data: { email: registration.email },
-        }),
-      };
-    } catch (err) {
-      if (err.code !== 'P2002') throw err; // email taken by another account — leave it
-    }
-  }
+  // createOrderRecord), which already synced its address/landmark — this
+  // only backfills what that couldn't: email (its own unique-constraint
+  // handling — see ensureCustomerForFirstTaste).
+  const customer = await ensureCustomerForFirstTaste(registration);
+  if (customer) order = { ...order, customer };
 
   await prisma.interestRegistration.update({
     where: { id: registration.id },
@@ -104,4 +129,4 @@ async function createFirstTasteOrder(registration, locationId) {
   return order;
 }
 
-module.exports = { ensureFirstTasteMenuOption, createFirstTasteOrder };
+module.exports = { ensureFirstTasteMenuOption, createFirstTasteOrder, ensureCustomerForFirstTaste };
