@@ -22,6 +22,7 @@ const broadcastRoutes = require('./routes/broadcast');
 const {apiRateLimit} = require('./middleware/security');
 const {decryptRequest, encryptResponse} = require('./middleware/encryption');
 const {getFrontendOrigins} = require('./lib/frontendOrigins');
+const {RECEIPT_MAX_FILE_SIZE_KB} = require('./lib/uploads');
 
 const app = express();
 
@@ -83,6 +84,7 @@ app.get('/api/payment-info', (req, res) => {
         bankName: process.env.BANK_NAME,
         accountName: process.env.BANK_ACCOUNT_NAME,
         accountNumber: process.env.BANK_ACCOUNT_NUMBER,
+        maxReceiptFileSizeKB: RECEIPT_MAX_FILE_SIZE_KB,
     });
 });
 

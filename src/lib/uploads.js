@@ -23,9 +23,21 @@ function diskStorageFor(dir) {
   });
 }
 
+// Configurable — receipts are as often a full-resolution camera photo of a
+// bank screen as a screenshot, and modern phone cameras routinely produce
+// 8-15MB (8192-15360KB) JPEGs. Defaults to 15360KB if RECEIPT_MAX_FILE_SIZE_KB
+// is unset or not a positive number. Also drives nginx's client_max_body_size
+// (see idea_pad/deploy.sh, which needs its own headroom on top of this) and
+// is echoed to the frontend via GET /api/payment-info (see index.js) so the
+// upload form can show and enforce the same limit before ever hitting the
+// network.
+const parsedMaxKB = Number(process.env.RECEIPT_MAX_FILE_SIZE_KB);
+const RECEIPT_MAX_FILE_SIZE_KB = parsedMaxKB > 0 ? parsedMaxKB : 15360;
+const RECEIPT_MAX_BYTES = RECEIPT_MAX_FILE_SIZE_KB * 1024;
+
 const uploadReceipt = multer({
   storage: diskStorageFor(RECEIPTS_DIR),
-  limits: { fileSize: 8 * 1024 * 1024 },
+  limits: { fileSize: RECEIPT_MAX_BYTES },
   fileFilter: imageFileFilter,
 });
 
@@ -35,4 +47,4 @@ const uploadMenuIcon = multer({
   fileFilter: imageFileFilter,
 });
 
-module.exports = { uploadReceipt, uploadMenuIcon, RECEIPTS_DIR, MENU_ICONS_DIR };
+module.exports = { uploadReceipt, uploadMenuIcon, RECEIPTS_DIR, MENU_ICONS_DIR, RECEIPT_MAX_BYTES, RECEIPT_MAX_FILE_SIZE_KB };
