@@ -273,7 +273,11 @@ model WhatsappMessageLog {
 // A customer ask the chat bot can't fulfil itself — an item that's not on the
 // menu/quoted, a custom bulk request, or a discount ask on a purchase. Logged
 // by the AI chat so admin can follow up manually; `readAt` drives the unread
-// counter on the admin "Requests" tab.
+// counter on the admin "Requests" tab. `orderId` is set once admin has
+// turned this request into an actual Order after a follow-up conversation
+// (see routes/requests.js's create-order endpoint) — a plain id reference
+// rather than a formal relation, same lightweight pattern as
+// InterestRegistration.orderId.
 model ExtraneousRequest {
   id             String      @id @default(cuid())
   requestType    String
@@ -282,6 +286,7 @@ model ExtraneousRequest {
   customerPhone  String?
   customerId     String?
   orderNarration String?
+  orderId        String?
   source         OrderSource @default(WEB_CHAT)
   readAt         DateTime?
   deletedAt      DateTime?

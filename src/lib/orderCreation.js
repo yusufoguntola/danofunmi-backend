@@ -128,6 +128,25 @@ async function priceItems(items) {
   return { lineItems, subtotal, optionsById, groupsById };
 }
 
+/** Retries order creation up to 5x on a narration/orderNumber collision
+ * (rare but possible — 6-char narration from a 32-char alphabet; 1-in-900,000
+ * for the order number). `data` omits narration/orderNumber — this fills
+ * them in fresh each attempt. Shared by createOrderRecord and
+ * createAdminCustomOrder below. */
+async function createOrderWithUniqueNarration(data, include) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const narration = generateNarration();
+    const orderNumber = generateOrderNumber();
+    try {
+      return await prisma.order.create({ data: { ...data, narration, orderNumber }, include });
+    } catch (err) {
+      if (err.code === 'P2002' && attempt < 4) continue;
+      throw err;
+    }
+  }
+  throw new Error('Could not generate a unique order narration/number');
+}
+
 async function createOrderRecord({
   customerName,
   customerPhone,
@@ -190,38 +209,115 @@ async function createOrderRecord({
     customer = await prisma.customer.update({ where: { id: customer.id }, data: customerPatch });
   }
 
-  // Narration/order-number collisions are rare (6-char narration from a 32-char
-  // alphabet; 1-in-900,000 for the order number) but retry defensively — a
-  // P2002 could come from either unique constraint, so just regenerate both.
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const narration = generateNarration();
-    const orderNumber = generateOrderNumber();
-    try {
-      const order = await prisma.order.create({
-        data: {
-          narration,
-          orderNumber,
-          customerId: customer.id,
-          locationId,
-          deliveryAddress,
-          landmark: landmark || null,
-          subtotal,
-          logisticsFee,
-          total,
-          source,
-          notes,
-          statusUpdatedAt: new Date(),
-          items: { create: lineItems },
-        },
-        include: { items: true, location: true, customer: true },
-      });
-      return order;
-    } catch (err) {
-      if (err.code === 'P2002' && attempt < 4) continue;
-      throw err;
-    }
-  }
-  throw new Error('Could not generate a unique order narration/number');
+  return createOrderWithUniqueNarration(
+    {
+      customerId: customer.id,
+      locationId,
+      deliveryAddress,
+      landmark: landmark || null,
+      subtotal,
+      logisticsFee,
+      total,
+      source,
+      notes,
+      statusUpdatedAt: new Date(),
+      items: { create: lineItems },
+    },
+    { items: true, location: true, customer: true }
+  );
 }
 
-module.exports = { createOrderRecord, priceItems, OrderValidationError };
+/**
+ * An admin-authored order created from a follow-up conversation about a
+ * logged ExtraneousRequest (see routes/requests.js) — no catalog lookup:
+ * `items` are exactly the name/size/price/quantity lines the admin entered
+ * (always stored as free-text lines, like the WhatsApp bot's off-menu
+ * catch-all — never linked back to a real MenuItemOption, since an edited
+ * quote may no longer match one anyway), and `total` is whatever figure was
+ * actually quoted rather than always subtotal + logisticsFee. Customer is
+ * always upserted by phone — there's no "authenticated customer" concept
+ * from the admin side.
+ */
+async function createAdminCustomOrder({
+  customerName,
+  customerPhone,
+  deliveryAddress,
+  landmark,
+  locationId,
+  items,
+  total,
+  notes,
+  source,
+}) {
+  if (!customerName || !customerPhone || !deliveryAddress || !locationId) {
+    throw new OrderValidationError('customerName, customerPhone, deliveryAddress, and locationId are required');
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new OrderValidationError('At least one order item is required');
+  }
+
+  const location = await prisma.location.findUnique({ where: { id: locationId } });
+  if (!location || !location.active) {
+    throw new OrderValidationError('Selected location is not available');
+  }
+
+  let subtotal = 0;
+  const lineItems = items.map((line) => {
+    const quantity = requireQuantity(line.quantity);
+    const unitPrice = Number(line.unitPrice);
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+      throw new OrderValidationError(`Invalid price for "${line.itemName || 'an item'}"`);
+    }
+    if (!line.itemName?.trim() || !line.size?.trim()) {
+      throw new OrderValidationError('Each item needs a name and size/label');
+    }
+    const lineTotal = unitPrice * quantity;
+    subtotal += lineTotal;
+    return {
+      menuItemId: null,
+      menuItemOptionId: null,
+      menuGroupId: null,
+      itemName: line.itemName.trim(),
+      size: line.size.trim(),
+      unitPrice,
+      quantity,
+      lineTotal,
+    };
+  });
+
+  const logisticsFee = Number(location.logisticsFee);
+  const finalTotal = Number.isFinite(Number(total)) && total !== '' ? Number(total) : subtotal + logisticsFee;
+  if (finalTotal < 0) throw new OrderValidationError('Total cannot be negative');
+
+  let customer = await prisma.customer.upsert({
+    where: { phone: customerPhone },
+    update: { name: customerName },
+    create: { name: customerName, phone: customerPhone },
+  });
+
+  const customerPatch = {};
+  if (customer.address !== deliveryAddress) customerPatch.address = deliveryAddress;
+  if (landmark && customer.landmark !== landmark) customerPatch.landmark = landmark;
+  if (Object.keys(customerPatch).length) {
+    customer = await prisma.customer.update({ where: { id: customer.id }, data: customerPatch });
+  }
+
+  return createOrderWithUniqueNarration(
+    {
+      customerId: customer.id,
+      locationId,
+      deliveryAddress,
+      landmark: landmark || null,
+      subtotal,
+      logisticsFee,
+      total: finalTotal,
+      source: source || 'WEB_CHAT',
+      notes: notes || null,
+      statusUpdatedAt: new Date(),
+      items: { create: lineItems },
+    },
+    { items: true, location: true, customer: true }
+  );
+}
+
+module.exports = { createOrderRecord, createAdminCustomOrder, priceItems, OrderValidationError };

@@ -5,7 +5,8 @@ const { orderLookupRateLimit, requireBrowserOrigin } = require('../middleware/se
 const { requireRecaptcha } = require('../lib/recaptcha');
 const { uploadReceipt } = require('../lib/uploads');
 const { createOrderRecord, OrderValidationError } = require('../lib/orderCreation');
-const { notifyOrderStatusChange } = require('../lib/orderNotifications');
+const { notifyOrderStatusChange, notifyAdminOfPayment } = require('../lib/orderNotifications');
+const { isValidNigerianPhone } = require('../lib/phone');
 
 const router = express.Router();
 
@@ -19,6 +20,12 @@ const orderIncludes = {
 // POST /api/orders — public, web checkout. optionalCustomerAuth links the
 // order to a signed-in account instead of the guest phone-upsert, if present.
 router.post('/', requireBrowserOrigin, requireRecaptcha(), optionalCustomerAuth, async (req, res) => {
+  // Scoped to this one public route (not inside createOrderRecord itself) —
+  // that function is shared with the WhatsApp bot and admin-created orders,
+  // whose phone numbers don't always come from this same validated web form.
+  if (req.body.customerPhone && !isValidNigerianPhone(req.body.customerPhone)) {
+    return res.status(400).json({ error: 'Please enter a valid Nigerian phone number.' });
+  }
   try {
     const order = await createOrderRecord({
       ...req.body,
@@ -66,7 +73,7 @@ router.get('/:idOrNarration', orderLookupRateLimit, requireBrowserOrigin, async 
 // + bank a transfer was made from (JSON body). uploadReceipt.single() is a
 // no-op for non-multipart requests, so both modes share this one route.
 router.post('/:id/receipt', uploadReceipt.single('receipt'), async (req, res) => {
-  const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+  const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { customer: true } });
   if (!order) return res.status(404).json({ error: 'Order not found' });
 
   const { senderName, senderBank } = req.body;
@@ -87,7 +94,29 @@ router.post('/:id/receipt', uploadReceipt.single('receipt'), async (req, res) =>
     }),
   ]);
 
+  notifyAdminOfPayment(order);
   res.status(201).json(receipt);
+});
+
+// PATCH /api/orders/:id/cancel — public, customer self-service cancellation.
+// Same no-auth trust model as the receipt route above (the order id itself
+// is the capability — whoever has the link can act on it). Only allowed
+// from PENDING_PAYMENT: once a receipt/payment details have been submitted
+// there's a human on the other end already handling it, so cancelling
+// from here on needs the admin (AdminOrders already has this).
+router.patch('/:id/cancel', async (req, res) => {
+  const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (order.status !== 'PENDING_PAYMENT') {
+    return res.status(400).json({ error: 'This order can no longer be cancelled here — contact us if you need help.' });
+  }
+
+  const updated = await prisma.order.update({
+    where: { id: order.id },
+    data: { status: 'CANCELLED', cancelledAt: new Date(), statusUpdatedAt: new Date() },
+    include: orderIncludes,
+  });
+  res.json(updated);
 });
 
 // GET /api/admin/orders — admin list, optional ?status= filter

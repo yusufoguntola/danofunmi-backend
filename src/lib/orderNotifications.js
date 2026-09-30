@@ -1,5 +1,5 @@
 const { sendPushToPhone } = require('./push');
-const { sendOrderStatusEmail } = require('./email');
+const { sendOrderStatusEmail, sendAdminReceiptNotificationEmail } = require('./email');
 
 /**
  * Tells a customer their order's status changed — push (in-app) and email,
@@ -28,4 +28,17 @@ function notifyOrderStatusChange(order, { title, body } = {}) {
   return Promise.all([pushDone, emailDone]);
 }
 
-module.exports = { notifyOrderStatusChange };
+/**
+ * Tells admin a customer just submitted payment proof (a receipt image, or
+ * sender name + bank) for an order, so it doesn't sit unnoticed until
+ * someone happens to refresh the Orders tab. Fire-and-forget, same as
+ * notifyOrderStatusChange above — best-effort, never blocks the route that
+ * triggered it.
+ */
+function notifyAdminOfPayment(order) {
+  return sendAdminReceiptNotificationEmail(order).catch((err) =>
+    console.error('sendAdminReceiptNotificationEmail failed:', err)
+  );
+}
+
+module.exports = { notifyOrderStatusChange, notifyAdminOfPayment };

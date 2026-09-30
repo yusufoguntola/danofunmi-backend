@@ -3,6 +3,7 @@
 // optional external services (ANTHROPIC_API_KEY, RECAPTCHA_SECRET_KEY, ...).
 const { SendMailClient } = require('zeptomail');
 const { getFrontendOrigins } = require('./frontendOrigins');
+const prisma = require('../db');
 
 const nairaFormatter = new Intl.NumberFormat('en-NG', {
   style: 'currency',
@@ -187,6 +188,27 @@ function orderStatusEmailHtml(order) {
   });
 }
 
+// Sent to every AdminUser whenever a customer submits payment proof (see
+// sendAdminReceiptNotificationEmail below) — never customer-facing.
+function adminReceiptEmailHtml(order) {
+  const origin = getFrontendOrigins()[0];
+  const ctaLink = origin
+    ? `<p style="margin:0 0 22px;"><a href="${origin}/restricted-path" style="color:#c4652f;font-weight:700;text-decoration:none;">Review in admin &rarr;</a></p>`
+    : '';
+  return emailShell({
+    title: `New payment — ${order.narration}`,
+    heading: 'Payment received',
+    bodyHtml: `
+      <p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:#33443a;">
+        ${escapeHtml(order.customer?.name || 'A customer')} (${escapeHtml(order.customer?.phone || 'no phone on file')})
+        submitted payment for order <strong>${escapeHtml(order.narration)}</strong> — total ${nairaFormatter.format(Number(order.total))}.
+        Please confirm it in the admin dashboard.
+      </p>
+      ${ctaLink}
+    `,
+  });
+}
+
 // Admin's free-text "send a broadcast" announcement (new menu, monthly
 // ordering reminder, ...) — see routes/broadcast.js. `body` is admin-typed
 // plain text, so it's escaped and line breaks preserved rather than treated
@@ -250,6 +272,32 @@ async function sendOrderStatusEmail(order) {
   });
 }
 
+/** Same best-effort/graceful-absence contract as above. Sent to every
+ * AdminUser's email — see lib/orderNotifications.js's notifyAdminOfPayment,
+ * fired whenever a customer submits payment proof (POST
+ * /api/orders/:id/receipt) — so admin doesn't have to keep refreshing the
+ * Orders tab to notice. A no-op if there are no admin accounts, same as the
+ * "no recipient" guards on the customer-facing sends above. */
+async function sendAdminReceiptNotificationEmail(order) {
+  if (!isConfigured()) {
+    console.log(`[email] ZOHO_API_KEY not set — skipping admin receipt notification for order ${order.narration}`);
+    return;
+  }
+  const admins = await prisma.adminUser.findMany({ select: { email: true, name: true } });
+  if (admins.length === 0) return;
+  const htmlbody = adminReceiptEmailHtml(order);
+  await Promise.all(
+    admins.map((admin) =>
+      getClient().sendMail({
+        from: fromAddress(),
+        to: [{ email_address: { address: admin.email, name: admin.name || '' } }],
+        subject: `New payment for order ${order.narration} — please confirm`,
+        htmlbody,
+      })
+    )
+  );
+}
+
 /** Same best-effort/graceful-absence contract as above. Sent by the admin
  * multi-channel broadcast tool (routes/broadcast.js) to every customer with
  * an email on file. */
@@ -271,5 +319,6 @@ module.exports = {
   sendFirstTasteConfirmationEmail,
   sendShortlistConfirmationEmail,
   sendOrderStatusEmail,
+  sendAdminReceiptNotificationEmail,
   sendBroadcastEmail,
 };

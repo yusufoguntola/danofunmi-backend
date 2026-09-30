@@ -6,6 +6,7 @@ const prisma = require('../db');
 const { requireCustomer } = require('../middleware/auth');
 const { authRateLimit, requireBrowserOrigin } = require('../middleware/security');
 const { requireRecaptcha } = require('../lib/recaptcha');
+const { isValidNigerianPhone } = require('../lib/phone');
 
 const router = express.Router();
 router.use(requireBrowserOrigin);
@@ -33,6 +34,9 @@ router.post('/signup', authRateLimit, requireRecaptcha(), async (req, res) => {
   const { name, email, phone, password } = req.body;
   if (!name || !email || !phone || !password) {
     return res.status(400).json({ error: 'name, email, phone, and password are required' });
+  }
+  if (!isValidNigerianPhone(phone)) {
+    return res.status(400).json({ error: 'Please enter a valid Nigerian phone number.' });
   }
   if (password.length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters' });
