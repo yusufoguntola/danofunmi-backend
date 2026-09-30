@@ -19,10 +19,13 @@ const pushRoutes = require('./routes/push');
 const customerRoutes = require('./routes/customer');
 const adminCustomerRoutes = require('./routes/adminCustomers');
 const broadcastRoutes = require('./routes/broadcast');
+const adminErrorLogRoutes = require('./routes/adminErrorLogs');
 const {apiRateLimit} = require('./middleware/security');
 const {decryptRequest, encryptResponse} = require('./middleware/encryption');
 const {getFrontendOrigins} = require('./lib/frontendOrigins');
 const {RECEIPT_MAX_FILE_SIZE_KB} = require('./lib/uploads');
+const {logError} = require('./lib/errorLog');
+const {sendAdminAlertEmail} = require('./lib/email');
 
 const app = express();
 
@@ -105,6 +108,7 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/customer', customerRoutes);
 app.use('/api/admin/customers', adminCustomerRoutes);
 app.use('/api/admin/broadcast', broadcastRoutes);
+app.use('/api/admin/error-logs', adminErrorLogRoutes);
 app.use('/api/push', pushRoutes);
 
 // Internal-only, used by the whatsapp-bot service
@@ -115,7 +119,30 @@ app.use((req, res) => res.status(404).json({error: 'Not found'}));
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
     console.error(err);
-    res.status(err.status || 500).json({error: err.message || 'Server error'});
+    const status = err.status || 500;
+
+    // Logged for admin to review (item: "log such issues for the admin to
+    // see and review") regardless of severity — fire-and-forget, never
+    // blocks or delays the actual error response below.
+    logError({
+        source: 'http',
+        message: err.message,
+        stack: err.stack,
+        context: {method: req.method, path: req.path, status},
+    }).catch(() => {});
+
+    // Only the genuinely unexpected ones (5xx — routes handle their own
+    // validation errors as 4xx without reaching this far) are worth an
+    // immediate email; those are the "crash" this alert is for.
+    if (status >= 500) {
+        sendAdminAlertEmail({
+            subject: `Server error on ${req.method} ${req.path}`,
+            message: err.message || 'Unknown error',
+            context: err.stack,
+        }).catch((alertErr) => console.error('sendAdminAlertEmail failed:', alertErr));
+    }
+
+    res.status(status).json({error: err.message || 'Server error'});
 });
 
 const port = process.env.PORT || 4000;

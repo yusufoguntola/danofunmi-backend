@@ -270,6 +270,24 @@ model WhatsappMessageLog {
   createdAt DateTime @default(now())
 }
 
+// An unexpected error caught somewhere a customer was doing something —
+// placing an order, chatting with the AI, or any other unhandled route
+// error (see the global error handler in index.js and lib/errorLog.js) —
+// logged so admin has somewhere to review them, independent of whether an
+// alert email went out for it (see lib/email.js's sendAdminAlertEmail,
+// ADMIN_EMAILS). `source` is a short tag ('http', 'chat', ...) for filtering;
+// `context` is a free-form JSON blob (request path/method, chat message
+// count, etc. — whatever's useful for that source, never customer PII like
+// full message bodies).
+model ErrorLog {
+  id        String   @id @default(cuid())
+  source    String
+  message   String
+  stack     String?
+  context   Json?
+  createdAt DateTime @default(now())
+}
+
 // A customer ask the chat bot can't fulfil itself — an item that's not on the
 // menu/quoted, a custom bulk request, or a discount ask on a purchase. Logged
 // by the AI chat so admin can follow up manually; `readAt` drives the unread

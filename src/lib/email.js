@@ -209,6 +209,23 @@ function adminReceiptEmailHtml(order) {
   });
 }
 
+// A crash/error/bug alert — see sendAdminAlertEmail below. `message` is
+// server-generated (an error message, not admin- or customer-typed), still
+// escaped since it can echo back user input (e.g. a malformed request body).
+function adminAlertEmailHtml({ subject, message, context }) {
+  const contextHtml = context
+    ? `<pre style="margin:16px 0 0;padding:14px 16px;background:#f2f7ef;border-radius:10px;font-size:12px;line-height:1.5;color:#33443a;white-space:pre-wrap;word-break:break-word;">${escapeHtml(context)}</pre>`
+    : '';
+  return emailShell({
+    title: subject,
+    heading: '⚠️ ' + subject,
+    bodyHtml: `
+      <p style="margin:0;font-size:15px;line-height:1.6;color:#33443a;white-space:pre-wrap;">${escapeHtml(message)}</p>
+      ${contextHtml}
+    `,
+  });
+}
+
 // Admin's free-text "send a broadcast" announcement (new menu, monthly
 // ordering reminder, ...) — see routes/broadcast.js. `body` is admin-typed
 // plain text, so it's escaped and line breaks preserved rather than treated
@@ -298,6 +315,45 @@ async function sendAdminReceiptNotificationEmail(order) {
   );
 }
 
+// ADMIN_EMAILS is a comma-separated list, e.g.
+// "owner@example.com, dev@example.com" — deliberately a separate config
+// from the AdminUser table above: a crash/error alert should reach whoever
+// is actually on call (which may include people with no admin login at
+// all), not just accounts that happen to exist in the app.
+function getAdminAlertEmails() {
+  return String(process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim())
+    .filter(Boolean);
+}
+
+/** Same best-effort/graceful-absence contract as above, plus a second no-op
+ * guard: skipped (not just logged) if ADMIN_EMAILS isn't set, same
+ * "optional, never blocks the caller" shape as everything else here. Used
+ * for crash/error/bug alerts — see lib/errorLog.js (general unexpected
+ * errors) and routes/chat.js (the AI chat failing or running out of
+ * credit). `context` is optional extra detail (e.g. a request path, a stack
+ * trace) shown in a preformatted block. */
+async function sendAdminAlertEmail({ subject, message, context }) {
+  const to = getAdminAlertEmails();
+  if (to.length === 0) return;
+  if (!isConfigured()) {
+    console.log(`[email] ZOHO_API_KEY not set — skipping admin alert: ${subject}`);
+    return;
+  }
+  const htmlbody = adminAlertEmailHtml({ subject, message, context });
+  await Promise.all(
+    to.map((email) =>
+      getClient().sendMail({
+        from: fromAddress(),
+        to: [{ email_address: { address: email } }],
+        subject: `[dánọ́fúnmi alert] ${subject}`,
+        htmlbody,
+      })
+    )
+  );
+}
+
 /** Same best-effort/graceful-absence contract as above. Sent by the admin
  * multi-channel broadcast tool (routes/broadcast.js) to every customer with
  * an email on file. */
@@ -320,5 +376,6 @@ module.exports = {
   sendShortlistConfirmationEmail,
   sendOrderStatusEmail,
   sendAdminReceiptNotificationEmail,
+  sendAdminAlertEmail,
   sendBroadcastEmail,
 };
