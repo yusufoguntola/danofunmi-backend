@@ -42,6 +42,22 @@ function siteOrigin() {
   return getFrontendOrigins()[0] || 'https://danofunmi.com';
 }
 
+// Where /uploads/* actually lives — this backend, not the frontend (see
+// app.js's `app.use('/uploads', express.static(...))`), so a MenuItem.icon
+// path like "/uploads/menu_images/buka-stew.jpg" needs this origin, not
+// siteOrigin(), to resolve in an email client. Falls back to this process's
+// own port for local/dev use.
+function apiOrigin() {
+  return process.env.PUBLIC_API_ORIGIN || `http://localhost:${process.env.PORT || 4000}`;
+}
+
+// A MenuItem/MenuGroup icon is either a relative /uploads/ path or an
+// already-absolute URL (e.g. a Pexels photo) — see
+// lib/menuCatalog.js's IMAGE_ICON_RE. Email needs an absolute URL either way.
+function absoluteIconUrl(icon) {
+  return icon.startsWith('/uploads/') ? `${apiOrigin()}${icon}` : icon;
+}
+
 // Same green/terracotta/cream palette as the frontend (frontend/src/index.css)
 // and the status-card mockups — inlined and table-based since email clients
 // don't load stylesheets or Google Fonts reliably. Shared by every email this
@@ -249,7 +265,7 @@ function broadcastEmailHtml({ title, body }) {
 function goLivePhotoCellHtml(item) {
   return `<td width="50%" style="padding:6px;">
     <div style="border-radius:14px;overflow:hidden;background:#f2f7ef;">
-      <img src="${escapeHtml(item.icon)}" alt="${escapeHtml(item.name)}" width="100%" style="display:block;width:100%;aspect-ratio:1;object-fit:cover;" />
+      <img src="${escapeHtml(absoluteIconUrl(item.icon))}" alt="${escapeHtml(item.name)}" width="100%" style="display:block;width:100%;aspect-ratio:1;object-fit:cover;" />
       <div style="padding:8px 10px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#16321f;text-align:center;">${escapeHtml(item.name)}</div>
     </div>
   </td>`;
@@ -266,7 +282,51 @@ function goLivePhotoGridHtml(items) {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 22px;">${rows.join('')}</table>`;
 }
 
-function goLiveEmailHtml({ name, items, link }) {
+// A plain-text fallback list of every active item (not just the ones with a
+// real photo above) — so the menu still comes across for the many inboxes
+// that block images by default, and so anything without a photo yet is
+// still represented.
+function goLiveMenuListHtml(allItems) {
+  if (!allItems || allItems.length === 0) return '';
+  const names = allItems.map((item) => escapeHtml(item.name)).join(' &nbsp;&middot;&nbsp; ');
+  return `<table role="presentation" style="width:100%;background:#f2f7ef;border-radius:14px;margin:0 0 22px;">
+    <tr><td style="padding:16px 20px;">
+      <span style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#5b6b60;">On the menu this month&nbsp;&nbsp;</span>
+      <span style="font-size:13px;font-weight:700;color:#16321f;">${names}</span>
+    </td></tr>
+  </table>`;
+}
+
+// What's actually worth showing off about the app — not just "we're open".
+// icon/title/description rows, same shape as the status-card mockups'
+// .detail component (mockup/status-cards/base.css), translated to
+// email-safe table markup.
+const GO_LIVE_FEATURES = [
+  { icon: '🧾', title: 'Easy ordering', text: 'Any soup, any rice, any combination — built in a few taps.' },
+  { icon: '💬', title: 'Smart AI chat', text: 'Tell our assistant what you want and it builds the order for you.' },
+  { icon: '✨', title: "Don't see it on the menu?", text: 'Ask the chat for a special request — we&rsquo;ll sort it out.' },
+  { icon: '🛵', title: 'Live order tracking', text: 'Follow your order from the kitchen to your door.' },
+  { icon: '🎁', title: 'Special offers', text: 'First-taste perks and monthly surprises for our customers.' },
+];
+
+function goLiveFeaturesHtml() {
+  const rows = GO_LIVE_FEATURES.map(
+    (f) => `<tr><td style="padding:0 0 14px;">
+      <table role="presentation" style="width:100%;background:#f2f7ef;border-radius:16px;"><tr>
+        <td style="width:50px;padding:16px 0 16px 18px;font-size:26px;line-height:1;vertical-align:top;">${f.icon}</td>
+        <td style="padding:16px 18px 16px 10px;">
+          <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:800;color:#16321f;">${escapeHtml(f.title)}</div>
+          <div style="margin-top:3px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.45;color:#5b6b60;">${f.text}</div>
+        </td>
+      </tr></table>
+    </td></tr>`
+  ).join('');
+  return `<p style="margin:30px 0 14px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#5b6b60;">Why you&rsquo;ll love ordering with us</p>
+    <table role="presentation" style="width:100%;border-collapse:collapse;">${rows}</table>
+    <p style="margin:0 0 22px;font-size:13px;font-style:italic;color:#7a897e;">...and plenty more we&rsquo;re cooking up.</p>`;
+}
+
+function goLiveEmailHtml({ name, items, allItems, link }) {
   const firstName = (name || '').trim().split(' ')[0] || 'friend';
   const photoGrid = goLivePhotoGridHtml(items);
   return emailShell({
@@ -277,11 +337,13 @@ function goLiveEmailHtml({ name, items, link }) {
         The wait is over — dánọ́fúnmi is officially open for orders. Pick your favorites, any combination, and we&rsquo;ll cook it fresh and have it delivered to you.
       </p>
       ${photoGrid || MENU_BLURB}
-      <table role="presentation" style="width:100%;margin:26px 0 0;">
+      ${goLiveMenuListHtml(allItems)}
+      <table role="presentation" style="width:100%;margin:4px 0 0;">
         <tr><td align="center">
           <a href="${escapeHtml(link)}" style="display:inline-block;background:#c4652f;color:#faf6ec;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:15px;text-decoration:none;padding:14px 34px;border-radius:999px;">Order now &rarr;</a>
         </td></tr>
       </table>
+      ${goLiveFeaturesHtml()}
     `,
   });
 }
@@ -403,12 +465,13 @@ async function sendAdminAlertEmail({ subject, message, context }) {
 }
 
 /** Same best-effort/graceful-absence contract as above. Sent by
- * scripts/send-go-live-email.js — `items` should come from
- * lib/menuCatalog.js's listPhotoItems(), `launchToken` is shared across the
- * whole send so every recipient's link carries the same `?launch=` marker
- * (sw.js forces a fresh network load for it rather than serving a
- * precached pre-launch shell). */
-async function sendGoLiveEmail({ to, name, items, launchToken }) {
+ * scripts/send-go-live-email.js — `items` (real-photo items, for the photo
+ * grid) should come from lib/menuCatalog.js's listPhotoItems(), `allItems`
+ * (the full active catalog, for the plain-text menu list) from
+ * listActiveItems(). `launchToken` is shared across the whole send so every
+ * recipient's link carries the same `?launch=` marker (sw.js forces a fresh
+ * network load for it rather than serving a precached pre-launch shell). */
+async function sendGoLiveEmail({ to, name, items, allItems, launchToken }) {
   if (!isConfigured()) {
     console.log(`[email] ZOHO_API_KEY not set — skipping go-live email to ${to}`);
     return;
@@ -419,7 +482,7 @@ async function sendGoLiveEmail({ to, name, items, launchToken }) {
     from: fromAddress(),
     to: [{ email_address: { address: to, name: name || '' } }],
     subject: "We're live! dánọ́fúnmi is open for orders 🎉",
-    htmlbody: goLiveEmailHtml({ name, items, link }),
+    htmlbody: goLiveEmailHtml({ name, items, allItems, link }),
   });
 }
 
