@@ -7,6 +7,12 @@ const prisma = require('../db');
 // themselves.
 const HIDDEN_CATEGORIES = ['Promotions'];
 
+// A MenuItem/MenuGroup `icon` is either an emoji/text glyph or a real
+// uploaded/generated photo (see routes/menu.js's icon upload/generate
+// endpoints) — mirrors frontend/src/components/MenuIcon.jsx's own copy of
+// this pattern, which can't share code across the frontend/backend split.
+const IMAGE_ICON_RE = /^(\/uploads\/|https?:\/\/)/;
+
 /** Discount amount for a group given its gross (pre-discount) total, clamped to [0, gross]. */
 function computeDiscountAmount(group, gross) {
   if (!group.discountType || group.discountValue == null) return 0;
@@ -92,4 +98,23 @@ async function getCatalog() {
   return [...items, ...groups];
 }
 
-module.exports = { getCatalog, listActiveItems, listActiveGroups, shapeGroup, computeDiscountAmount, HIDDEN_CATEGORIES };
+/** Active menu items that have a real photo (not just an emoji glyph) —
+ * used anywhere a feature needs genuine food photography rather than the
+ * full catalog, e.g. the go-live announcement email/status card (see
+ * lib/email.js's sendGoLiveEmail). Ordered by creation so results stay
+ * stable between calls; capped at `limit`. */
+async function listPhotoItems(limit = 4) {
+  const items = await listActiveItems();
+  return items.filter((item) => IMAGE_ICON_RE.test(item.icon || '')).slice(0, limit);
+}
+
+module.exports = {
+  getCatalog,
+  listActiveItems,
+  listActiveGroups,
+  listPhotoItems,
+  shapeGroup,
+  computeDiscountAmount,
+  HIDDEN_CATEGORIES,
+  IMAGE_ICON_RE,
+};

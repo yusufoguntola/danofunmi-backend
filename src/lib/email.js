@@ -238,6 +238,54 @@ function broadcastEmailHtml({ title, body }) {
   });
 }
 
+// The one-time "we're live!" announcement — see scripts/send-go-live-email.js.
+// `items` are real-photo menu items (lib/menuCatalog.js's listPhotoItems),
+// shown as a photo grid so the email actually sells the food rather than
+// just announcing a link; gracefully falls back to the plain MENU_BLURB
+// text when no item has a real photo on file yet. `link` carries the
+// `?launch=` cache-busting marker sw.js's NavigationRoute denylist uses to
+// force a fresh network load, for anyone whose browser still has the old
+// "coming soon" build precached from before launch.
+function goLivePhotoCellHtml(item) {
+  return `<td width="50%" style="padding:6px;">
+    <div style="border-radius:14px;overflow:hidden;background:#f2f7ef;">
+      <img src="${escapeHtml(item.icon)}" alt="${escapeHtml(item.name)}" width="100%" style="display:block;width:100%;aspect-ratio:1;object-fit:cover;" />
+      <div style="padding:8px 10px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#16321f;text-align:center;">${escapeHtml(item.name)}</div>
+    </div>
+  </td>`;
+}
+
+function goLivePhotoGridHtml(items) {
+  if (!items || items.length === 0) return '';
+  const rows = [];
+  for (let i = 0; i < items.length; i += 2) {
+    const pair = items.slice(i, i + 2);
+    const cells = pair.map(goLivePhotoCellHtml).join('') + (pair.length === 1 ? '<td width="50%"></td>' : '');
+    rows.push(`<tr>${cells}</tr>`);
+  }
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 22px;">${rows.join('')}</table>`;
+}
+
+function goLiveEmailHtml({ name, items, link }) {
+  const firstName = (name || '').trim().split(' ')[0] || 'friend';
+  const photoGrid = goLivePhotoGridHtml(items);
+  return emailShell({
+    title: "We're live!",
+    heading: 'We&rsquo;re live, ' + escapeHtml(firstName) + '! 🎉',
+    bodyHtml: `
+      <p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:#33443a;">
+        The wait is over — dánọ́fúnmi is officially open for orders. Pick your favorites, any combination, and we&rsquo;ll cook it fresh and have it delivered to you.
+      </p>
+      ${photoGrid || MENU_BLURB}
+      <table role="presentation" style="width:100%;margin:26px 0 0;">
+        <tr><td align="center">
+          <a href="${escapeHtml(link)}" style="display:inline-block;background:#c4652f;color:#faf6ec;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:15px;text-decoration:none;padding:14px 34px;border-radius:999px;">Order now &rarr;</a>
+        </td></tr>
+      </table>
+    `,
+  });
+}
+
 /** Best-effort — callers should catch and log rather than fail the request
  * over a delivery problem. A no-op (with a console notice) if ZOHO_API_KEY
  * isn't set. */
@@ -354,6 +402,27 @@ async function sendAdminAlertEmail({ subject, message, context }) {
   );
 }
 
+/** Same best-effort/graceful-absence contract as above. Sent by
+ * scripts/send-go-live-email.js — `items` should come from
+ * lib/menuCatalog.js's listPhotoItems(), `launchToken` is shared across the
+ * whole send so every recipient's link carries the same `?launch=` marker
+ * (sw.js forces a fresh network load for it rather than serving a
+ * precached pre-launch shell). */
+async function sendGoLiveEmail({ to, name, items, launchToken }) {
+  if (!isConfigured()) {
+    console.log(`[email] ZOHO_API_KEY not set — skipping go-live email to ${to}`);
+    return;
+  }
+  const origin = siteOrigin();
+  const link = `${origin}/?launch=${encodeURIComponent(launchToken || Date.now())}`;
+  await getClient().sendMail({
+    from: fromAddress(),
+    to: [{ email_address: { address: to, name: name || '' } }],
+    subject: "We're live! dánọ́fúnmi is open for orders 🎉",
+    htmlbody: goLiveEmailHtml({ name, items, link }),
+  });
+}
+
 /** Same best-effort/graceful-absence contract as above. Sent by the admin
  * multi-channel broadcast tool (routes/broadcast.js) to every customer with
  * an email on file. */
@@ -378,4 +447,5 @@ module.exports = {
   sendAdminReceiptNotificationEmail,
   sendAdminAlertEmail,
   sendBroadcastEmail,
+  sendGoLiveEmail,
 };

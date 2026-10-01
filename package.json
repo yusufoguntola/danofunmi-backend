@@ -16,6 +16,9 @@
     "interest:create-customers": "node scripts/create-customers-from-interest.js",
     "interest:create-orders": "node scripts/create-orders-from-shortlist.js",
     "order:set-status": "node scripts/set-order-status.js",
+    "email:go-live:all": "node scripts/send-go-live-email.js --all",
+    "email:go-live:to": "node scripts/send-go-live-email.js --to",
+    "card:go-live": "node scripts/generate-go-live-card.js",
     "test": "jest",
     "test:watch": "jest --watch"
   },
