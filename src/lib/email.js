@@ -44,17 +44,6 @@ function siteOrigin() {
   return getFrontendOrigins()[0] || 'https://danofunmi.com';
 }
 
-// Where /uploads/* actually lives on disk (see app.js's
-// `app.use('/uploads', express.static(...))`). A MenuItem.icon path like
-// "/uploads/menu_images/buka-stew.jpg" is only reachable over HTTP in a
-// deployed environment with a real public origin — in dev (and really,
-// generally) that's not something email HTML should depend on, since mail
-// clients fetch images from wherever they are, not from this server's own
-// network. So local uploads are embedded directly as ZeptoMail
-// `inline_images` (referenced via `cid:` in the HTML) instead of linked by
-// URL — the image travels with the email, no origin/reachability needed.
-const UPLOADS_DIR = path.join(__dirname, '..', '..', 'uploads');
-
 const MIME_BY_EXT = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -62,15 +51,12 @@ const MIME_BY_EXT = {
   '.webp': 'image/webp',
 };
 
-/** Reads a local "/uploads/..." icon path off disk for inline embedding —
- * `{ content, mime_type }`, base64-encoded as ZeptoMail's inline_images
- * expects. */
-function readUploadForInline(iconPath) {
-  const rel = iconPath.replace(/^\/uploads\//, '');
-  const abs = path.join(UPLOADS_DIR, rel);
+/** Reads a local file off disk for inline embedding — `{ content, mime_type }`,
+ * base64-encoded as ZeptoMail's inline_images expects. */
+function readFileForInline(absPath) {
   return {
-    content: fs.readFileSync(abs).toString('base64'),
-    mime_type: MIME_BY_EXT[path.extname(abs).toLowerCase()] || 'image/jpeg',
+    content: fs.readFileSync(absPath).toString('base64'),
+    mime_type: MIME_BY_EXT[path.extname(absPath).toLowerCase()] || 'image/jpeg',
   };
 }
 
@@ -271,56 +257,37 @@ function broadcastEmailHtml({ title, body }) {
 }
 
 // The one-time "we're live!" announcement — see scripts/send-go-live-email.js.
-// `items` are real-photo menu items (lib/menuCatalog.js's listPhotoItems),
-// shown as a photo grid so the email actually sells the food rather than
-// just announcing a link; gracefully falls back to the plain MENU_BLURB
-// text when no item has a real photo on file yet. `link` carries the
-// `?launch=` cache-busting marker sw.js's NavigationRoute denylist uses to
-// force a fresh network load, for anyone whose browser still has the old
-// "coming soon" build precached from before launch.
-function goLivePhotoCellHtml(item, src) {
-  return `<td width="50%" style="padding:6px;">
-    <div style="border-radius:14px;overflow:hidden;background:#f2f7ef;">
-      <img src="${escapeHtml(src)}" alt="${escapeHtml(item.name)}" width="100%" style="display:block;width:100%;aspect-ratio:1;object-fit:cover;" />
-      <div style="padding:8px 10px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#16321f;text-align:center;">${escapeHtml(item.name)}</div>
-    </div>
-  </td>`;
-}
+// `link` carries the `?launch=` cache-busting marker sw.js's NavigationRoute
+// denylist uses to force a fresh network load, for anyone whose browser
+// still has the old "coming soon" build precached from before launch.
 
-/** Builds the photo grid's HTML *and* the inline_images ZeptoMail needs to
- * actually deliver those photos — a local "/uploads/..." icon is embedded
- * (cid:menu-photo-N), an already-absolute one (e.g. a Pexels URL) is just
- * linked directly, same as before. Returns `{ html, inlineImages }`. */
-function buildGoLivePhotoGrid(items) {
-  if (!items || items.length === 0) return { html: '', inlineImages: [] };
+// A single pre-composed collage (fanned, centered photo stack) of the real
+// menu photos in backend/uploads/menu_images — approved design, see
+// idea_pad/todo.md's "image stack" request. A static asset rather than
+// something built from live MenuItem.icon data: regenerate
+// backend/assets/go-live-menu-stack.png by hand if the lineup changes.
+const GO_LIVE_STACK_PATH = path.join(__dirname, '..', '..', 'assets', 'go-live-menu-stack.png');
+const GO_LIVE_STACK_CID = 'menu-stack';
 
-  const inlineImages = [];
-  const cells = items.map((item, i) => {
-    if (item.icon.startsWith('/uploads/')) {
-      const cid = `menu-photo-${i}`;
-      inlineImages.push({ cid, ...readUploadForInline(item.icon) });
-      return goLivePhotoCellHtml(item, `cid:${cid}`);
-    }
-    return goLivePhotoCellHtml(item, item.icon);
-  });
-
-  const rows = [];
-  for (let i = 0; i < cells.length; i += 2) {
-    const pair = cells.slice(i, i + 2);
-    rows.push(`<tr>${pair.join('')}${pair.length === 1 ? '<td width="50%"></td>' : ''}</tr>`);
-  }
-  const html = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 22px;">${rows.join('')}</table>`;
+/** Returns `{ html, inlineImages }` for the centered photo-stack section. */
+function goLiveMenuStackHtml() {
+  const inlineImages = [{ cid: GO_LIVE_STACK_CID, ...readFileForInline(GO_LIVE_STACK_PATH) }];
+  const html = `<table role="presentation" width="100%" style="margin:0 0 22px;">
+    <tr><td align="center">
+      <img src="cid:${GO_LIVE_STACK_CID}" width="420" alt="This month's menu" style="display:block;width:420px;max-width:100%;height:auto;" />
+    </td></tr>
+  </table>`;
   return { html, inlineImages };
 }
 
-// A fallback list of every active item (not just the ones with a real photo
-// above) — chips rather than a run-on line, so it reads as a proper menu
-// at a glance, and so the menu still comes across for the many inboxes
-// that block remote images by default, and for anything without a photo
-// yet.
+// Just a taste of the menu, not the whole thing — "and many more" covers
+// the rest, per idea_pad/todo.md.
+const GO_LIVE_MENU_LIST_COUNT = 4;
+
 function goLiveMenuListHtml(allItems) {
   if (!allItems || allItems.length === 0) return '';
   const chips = allItems
+    .slice(0, GO_LIVE_MENU_LIST_COUNT)
     .map(
       (item) =>
         `<span style="display:inline-block;background:#ffffff;border:1px solid rgba(22,50,31,0.14);border-radius:999px;padding:8px 16px;margin:0 8px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#16321f;">${escapeHtml(item.name)}</span>`
@@ -329,7 +296,7 @@ function goLiveMenuListHtml(allItems) {
   return `<table role="presentation" style="width:100%;background:#f2f7ef;border-radius:14px;margin:0 0 22px;">
     <tr><td style="padding:18px 20px 10px;">
       <p style="margin:0 0 10px;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#5b6b60;">On the menu this month</p>
-      <div>${chips}</div>
+      <div>${chips}<span style="display:inline-block;padding:8px 4px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;font-style:italic;color:#7a897e;">and many more&hellip;</span></div>
     </td></tr>
   </table>`;
 }
@@ -365,10 +332,10 @@ function goLiveFeaturesHtml() {
 
 /** Returns `{ html, inlineImages }` — `inlineImages` must be passed through
  * to ZeptoMail's `inline_images` send param (see sendGoLiveEmail) or the
- * photo grid's `cid:` references won't resolve to anything. */
-function goLiveEmailHtml({ name, items, allItems, link }) {
+ * photo stack's `cid:` reference won't resolve to anything. */
+function goLiveEmailHtml({ name, allItems, link }) {
   const firstName = (name || '').trim().split(' ')[0] || 'friend';
-  const { html: photoGrid, inlineImages } = buildGoLivePhotoGrid(items);
+  const { html: photoStack, inlineImages } = goLiveMenuStackHtml();
   const html = emailShell({
     title: "We're live!",
     heading: 'We&rsquo;re live, ' + escapeHtml(firstName) + '! 🎉',
@@ -376,7 +343,7 @@ function goLiveEmailHtml({ name, items, allItems, link }) {
       <p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:#33443a;">
         The wait is over — dánọ́fúnmi is officially open for orders. Pick your favorites, any combination, and we&rsquo;ll cook it fresh and have it delivered to you.
       </p>
-      ${photoGrid || MENU_BLURB}
+      ${photoStack}
       ${goLiveMenuListHtml(allItems)}
       <table role="presentation" style="width:100%;margin:4px 0 0;">
         <tr><td align="center">
@@ -506,20 +473,20 @@ async function sendAdminAlertEmail({ subject, message, context }) {
 }
 
 /** Same best-effort/graceful-absence contract as above. Sent by
- * scripts/send-go-live-email.js — `items` (real-photo items, for the photo
- * grid) should come from lib/menuCatalog.js's listPhotoItems(), `allItems`
- * (the full active catalog, for the "on the menu this month" chip list)
- * from listActiveItems(). `launchToken` is shared across the whole send so every
- * recipient's link carries the same `?launch=` marker (sw.js forces a fresh
- * network load for it rather than serving a precached pre-launch shell). */
-async function sendGoLiveEmail({ to, name, items, allItems, launchToken }) {
+ * scripts/send-go-live-email.js — `allItems` (the full active catalog, for
+ * the "on the menu this month" chip list) should come from
+ * lib/menuCatalog.js's listActiveItems(). `launchToken` is shared across the
+ * whole send so every recipient's link carries the same `?launch=` marker
+ * (sw.js forces a fresh network load for it rather than serving a precached
+ * pre-launch shell). */
+async function sendGoLiveEmail({ to, name, allItems, launchToken }) {
   if (!isConfigured()) {
     console.log(`[email] ZOHO_API_KEY not set — skipping go-live email to ${to}`);
     return;
   }
   const origin = siteOrigin();
   const link = `${origin}/?launch=${encodeURIComponent(launchToken || Date.now())}`;
-  const { html, inlineImages } = goLiveEmailHtml({ name, items, allItems, link });
+  const { html, inlineImages } = goLiveEmailHtml({ name, allItems, link });
   await getClient().sendMail({
     from: fromAddress(),
     to: [{ email_address: { address: to, name: name || '' } }],

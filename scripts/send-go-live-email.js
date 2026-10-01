@@ -6,7 +6,7 @@
 require('dotenv').config();
 const prisma = require('../src/db');
 const { sendGoLiveEmail, isConfigured } = require('../src/lib/email');
-const { listPhotoItems, listActiveItems } = require('../src/lib/menuCatalog');
+const { listActiveItems } = require('../src/lib/menuCatalog');
 
 function usage() {
   console.error('Usage: npm run email:go-live:all');
@@ -53,10 +53,7 @@ async function main() {
     return;
   }
 
-  const [items, allItems] = await Promise.all([listPhotoItems(6), listActiveItems()]);
-  if (items.length === 0) {
-    console.warn('No menu items have a real photo yet (lib/menuCatalog.js listPhotoItems) — the email will go out without a photo grid.');
-  }
+  const allItems = await listActiveItems();
 
   // One shared token so every recipient's link carries the same `?launch=`
   // marker — see sw.js's NavigationRoute denylist.
@@ -64,7 +61,7 @@ async function main() {
 
   console.log(`Sending go-live email to ${targets.length} recipient(s)...`);
   const settled = await Promise.allSettled(
-    targets.map((t) => sendGoLiveEmail({ to: t.email, name: t.name, items, allItems, launchToken }))
+    targets.map((t) => sendGoLiveEmail({ to: t.email, name: t.name, allItems, launchToken }))
   );
 
   let sent = 0;
