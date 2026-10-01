@@ -330,6 +330,33 @@ function goLiveFeaturesHtml() {
     <p style="margin:0 0 22px;font-size:13px;font-style:italic;color:#7a897e;">...and plenty more we&rsquo;re cooking up.</p>`;
 }
 
+// Monthly cutoff dates — every order window closes on the 15th, combo
+// (group) order requests close earlier on the 10th since they take more
+// prep lead time; anything placed after either date rolls into next
+// month's batch instead of being rejected outright. Terracotta-tinted
+// (vs. the mist-green panels above) so a deadline reads as the one thing
+// here worth pausing on.
+const GO_LIVE_SCHEDULE = [
+  { day: '10th', label: 'Combo order requests close' },
+  { day: '15th', label: 'Ordering closes for the month' },
+];
+
+function goLiveScheduleHtml() {
+  const rows = GO_LIVE_SCHEDULE.map(
+    (s) => `<tr>
+      <td style="padding:10px 0;width:64px;font-family:'Fraunces',Georgia,serif;font-style:italic;font-weight:700;font-size:22px;color:#c4652f;white-space:nowrap;">${s.day}</td>
+      <td style="padding:10px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;color:#16321f;">${s.label}</td>
+    </tr>`
+  ).join('<tr><td colspan="2" style="border-top:1px solid rgba(196,101,47,0.18);"></td></tr>');
+  return `<table role="presentation" style="width:100%;background:#fbf1e9;border:1px solid rgba(196,101,47,0.25);border-radius:14px;margin:0 0 22px;">
+    <tr><td style="padding:18px 20px;">
+      <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#a44f22;">⏰ Our monthly ordering window</p>
+      <table role="presentation" style="width:100%;border-collapse:collapse;">${rows}</table>
+      <p style="margin:10px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12.5px;line-height:1.5;color:#5b6b60;">Order after the 15th? No worries — it&rsquo;s simply batched in with next month&rsquo;s run.</p>
+    </td></tr>
+  </table>`;
+}
+
 /** Returns `{ html, inlineImages }` — `inlineImages` must be passed through
  * to ZeptoMail's `inline_images` send param (see sendGoLiveEmail) or the
  * photo stack's `cid:` reference won't resolve to anything. */
@@ -345,11 +372,12 @@ function goLiveEmailHtml({ name, allItems, link }) {
       </p>
       ${photoStack}
       ${goLiveMenuListHtml(allItems)}
-      <table role="presentation" style="width:100%;margin:4px 0 0;">
+      <table role="presentation" style="width:100%;margin:4px 0 22px;">
         <tr><td align="center">
           <a href="${escapeHtml(link)}" style="display:inline-block;background:#c4652f;color:#faf6ec;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:15px;text-decoration:none;padding:14px 34px;border-radius:999px;">Order now &rarr;</a>
         </td></tr>
       </table>
+      ${goLiveScheduleHtml()}
       ${goLiveFeaturesHtml()}
     `,
   });
