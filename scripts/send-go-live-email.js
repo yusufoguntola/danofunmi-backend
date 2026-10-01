@@ -6,7 +6,6 @@
 require('dotenv').config();
 const prisma = require('../src/db');
 const { sendGoLiveEmail, isConfigured } = require('../src/lib/email');
-const { listActiveItems } = require('../src/lib/menuCatalog');
 
 function usage() {
   console.error('Usage: npm run email:go-live:all');
@@ -53,15 +52,13 @@ async function main() {
     return;
   }
 
-  const allItems = await listActiveItems();
-
   // One shared token so every recipient's link carries the same `?launch=`
   // marker — see sw.js's NavigationRoute denylist.
   const launchToken = Date.now();
 
   console.log(`Sending go-live email to ${targets.length} recipient(s)...`);
   const settled = await Promise.allSettled(
-    targets.map((t) => sendGoLiveEmail({ to: t.email, name: t.name, allItems, launchToken }))
+    targets.map((t) => sendGoLiveEmail({ to: t.email, name: t.name, launchToken }))
   );
 
   let sent = 0;

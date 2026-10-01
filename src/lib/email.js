@@ -281,18 +281,15 @@ function goLiveMenuStackHtml() {
 }
 
 // Just a taste of the menu, not the whole thing — "and many more" covers
-// the rest, per idea_pad/todo.md.
-const GO_LIVE_MENU_LIST_COUNT = 4;
+// the rest. A fixed hand-picked lineup (not pulled from the live catalog)
+// per idea_pad/todo.md.
+const GO_LIVE_MENU_LIST_ITEMS = ['Buka Stew', 'Egusi', 'Efo Riro', 'Party Jollof'];
 
-function goLiveMenuListHtml(allItems) {
-  if (!allItems || allItems.length === 0) return '';
-  const chips = allItems
-    .slice(0, GO_LIVE_MENU_LIST_COUNT)
-    .map(
-      (item) =>
-        `<span style="display:inline-block;background:#ffffff;border:1px solid rgba(22,50,31,0.14);border-radius:999px;padding:8px 16px;margin:0 8px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#16321f;">${escapeHtml(item.name)}</span>`
-    )
-    .join('');
+function goLiveMenuListHtml() {
+  const chips = GO_LIVE_MENU_LIST_ITEMS.map(
+    (name) =>
+      `<span style="display:inline-block;background:#ffffff;border:1px solid rgba(22,50,31,0.14);border-radius:999px;padding:8px 16px;margin:0 8px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#16321f;">${escapeHtml(name)}</span>`
+  ).join('');
   return `<table role="presentation" style="width:100%;background:#f2f7ef;border-radius:14px;margin:0 0 22px;">
     <tr><td style="padding:18px 20px 10px;">
       <p style="margin:0 0 10px;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#5b6b60;">On the menu this month</p>
@@ -360,7 +357,7 @@ function goLiveScheduleHtml() {
 /** Returns `{ html, inlineImages }` — `inlineImages` must be passed through
  * to ZeptoMail's `inline_images` send param (see sendGoLiveEmail) or the
  * photo stack's `cid:` reference won't resolve to anything. */
-function goLiveEmailHtml({ name, allItems, link }) {
+function goLiveEmailHtml({ name, link }) {
   const firstName = (name || '').trim().split(' ')[0] || 'friend';
   const { html: photoStack, inlineImages } = goLiveMenuStackHtml();
   const html = emailShell({
@@ -371,7 +368,7 @@ function goLiveEmailHtml({ name, allItems, link }) {
         The wait is over — dánọ́fúnmi is officially open for orders. Pick your favorites, any combination, and we&rsquo;ll cook it fresh and have it delivered to you.
       </p>
       ${photoStack}
-      ${goLiveMenuListHtml(allItems)}
+      ${goLiveMenuListHtml()}
       <table role="presentation" style="width:100%;margin:4px 0 22px;">
         <tr><td align="center">
           <a href="${escapeHtml(link)}" style="display:inline-block;background:#c4652f;color:#faf6ec;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:15px;text-decoration:none;padding:14px 34px;border-radius:999px;">Order now &rarr;</a>
@@ -501,20 +498,18 @@ async function sendAdminAlertEmail({ subject, message, context }) {
 }
 
 /** Same best-effort/graceful-absence contract as above. Sent by
- * scripts/send-go-live-email.js — `allItems` (the full active catalog, for
- * the "on the menu this month" chip list) should come from
- * lib/menuCatalog.js's listActiveItems(). `launchToken` is shared across the
+ * scripts/send-go-live-email.js — `launchToken` is shared across the
  * whole send so every recipient's link carries the same `?launch=` marker
  * (sw.js forces a fresh network load for it rather than serving a precached
  * pre-launch shell). */
-async function sendGoLiveEmail({ to, name, allItems, launchToken }) {
+async function sendGoLiveEmail({ to, name, launchToken }) {
   if (!isConfigured()) {
     console.log(`[email] ZOHO_API_KEY not set — skipping go-live email to ${to}`);
     return;
   }
   const origin = siteOrigin();
   const link = `${origin}/?launch=${encodeURIComponent(launchToken || Date.now())}`;
-  const { html, inlineImages } = goLiveEmailHtml({ name, allItems, link });
+  const { html, inlineImages } = goLiveEmailHtml({ name, link });
   await getClient().sendMail({
     from: fromAddress(),
     to: [{ email_address: { address: to, name: name || '' } }],
