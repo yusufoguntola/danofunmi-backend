@@ -46,7 +46,13 @@ Responsibilities, roughly in order:
 6. After create_order succeeds, tell them the order narration AND the shorter order number it
    returns (either works for tracking later), plus the bank payment details, and let them know
    there's an "Upload payment receipt" button right here in the chat they can use once they've
-   paid — you don't handle the image yourself.
+   paid — you don't handle the image yourself. Orders are processed monthly: individual items
+   close on the 15th, combo deals close earlier on the 10th since they need more prep lead time —
+   create_order's response includes each order's orderMonth so you can tell the customer which
+   month to expect delivery in. If the cart mixed a combo and individual items that fell on
+   opposite sides of these cutoffs, create_order returns split: true with TWO separate orders
+   (their own narration, payment reference, and processing month each) — explain clearly that
+   their order was split into two deliveries/payments for that reason, and read back both.
 7. If a customer asks about an existing order, call track_order with whichever they give you —
    the narration (format DFM-XXXXXX) or the order number — to check status.
 8. If an order's status is DELIVERED (from track_order) and the customer wants to share feedback,
@@ -233,29 +239,35 @@ async function toolUpdateCart({ items }) {
 }
 
 async function toolCreateOrder(input, context) {
-  const order = await createOrderRecord({
+  const { orders } = await createOrderRecord({
     ...input,
     source: 'WEB_CHAT',
     authenticatedCustomerId: context?.authenticatedCustomerId,
   });
+  // Normally one order. Exactly two when the cart mixed a combo deal and
+  // individual items that fell on opposite sides of the monthly cutoff (see
+  // lib/orderCreation.js) — tell the customer about both, each with its own
+  // narration/payment reference and processing month.
   return {
-    order: {
+    split: orders.length > 1,
+    orders: orders.map((order) => ({
       id: order.id,
       narration: order.narration,
       orderNumber: order.orderNumber,
       status: order.status,
+      orderMonth: order.orderMonth,
       subtotal: Number(order.subtotal),
       logisticsFee: Number(order.logisticsFee),
       total: Number(order.total),
       customerPhone: order.customer.phone,
-    },
-    payment: {
-      bankName: process.env.BANK_NAME,
-      accountName: process.env.BANK_ACCOUNT_NAME,
-      accountNumber: process.env.BANK_ACCOUNT_NUMBER,
-      amount: Number(order.total),
-      narration: order.narration,
-    },
+      payment: {
+        bankName: process.env.BANK_NAME,
+        accountName: process.env.BANK_ACCOUNT_NAME,
+        accountNumber: process.env.BANK_ACCOUNT_NUMBER,
+        amount: Number(order.total),
+        narration: order.narration,
+      },
+    })),
   };
 }
 
@@ -359,13 +371,20 @@ function extractMeta(newAssistantBlocks, toolResultsByCallId) {
     const parsed = JSON.parse(result.content);
 
     if (block.name === 'create_order') {
+      // A split checkout (combo + individual items landing in different
+      // processing months — see createOrderRecord) returns more than one
+      // order; the structured payment-upload UI in ChatWidget only tracks
+      // one order at a time, so this surfaces the first and leaves the
+      // assistant's own reply (per SYSTEM_PROMPT) to narrate the rest —
+      // the customer can pay the other one from its own status page.
+      const first = parsed.orders[0];
       orderMeta = {
-        orderId: parsed.order.id,
-        narration: parsed.order.narration,
-        orderNumber: parsed.order.orderNumber,
-        status: parsed.order.status,
-        total: parsed.order.total,
-        customerPhone: parsed.order.customerPhone,
+        orderId: first.id,
+        narration: first.narration,
+        orderNumber: first.orderNumber,
+        status: first.status,
+        total: first.total,
+        customerPhone: first.customerPhone,
       };
     } else if (block.name === 'track_order') {
       orderMeta = {

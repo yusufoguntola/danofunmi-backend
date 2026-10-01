@@ -54,3 +54,38 @@ describe('DELETE /api/admin/feedback/:id', () => {
     expect(res.status).toBe(500);
   });
 });
+
+describe('PATCH /api/admin/feedback/:id', () => {
+  test('sets visibleOnLanding', async () => {
+    prisma.feedback.update.mockResolvedValue({ id: 'f1', visibleOnLanding: false });
+    const res = await request(buildApp()).patch('/api/admin/feedback/f1').send({ visibleOnLanding: false });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ id: 'f1', visibleOnLanding: false });
+    expect(prisma.feedback.update).toHaveBeenCalledWith({
+      where: { id: 'f1', deletedAt: null },
+      data: { visibleOnLanding: false },
+    });
+  });
+
+  test('coerces a non-boolean body to boolean', async () => {
+    prisma.feedback.update.mockResolvedValue({});
+    await request(buildApp()).patch('/api/admin/feedback/f1').send({});
+    expect(prisma.feedback.update).toHaveBeenCalledWith({
+      where: { id: 'f1', deletedAt: null },
+      data: { visibleOnLanding: false },
+    });
+  });
+
+  test('404s when the feedback does not exist (or is already deleted)', async () => {
+    prisma.feedback.update.mockRejectedValue(Object.assign(new Error('not found'), { code: 'P2025' }));
+    const res = await request(buildApp()).patch('/api/admin/feedback/missing').send({ visibleOnLanding: true });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Feedback not found');
+  });
+
+  test('a non-P2025 error reaches the error handler', async () => {
+    prisma.feedback.update.mockRejectedValue(new Error('DB down'));
+    const res = await request(buildApp()).patch('/api/admin/feedback/f1').send({ visibleOnLanding: true });
+    expect(res.status).toBe(500);
+  });
+});

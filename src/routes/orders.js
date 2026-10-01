@@ -7,6 +7,7 @@ const { uploadReceipt } = require('../lib/uploads');
 const { createOrderRecord, OrderValidationError } = require('../lib/orderCreation');
 const { notifyOrderStatusChange, notifyAdminOfPayment } = require('../lib/orderNotifications');
 const { isValidNigerianPhone } = require('../lib/phone');
+const { scheduleStatus } = require('../lib/orderSchedule');
 
 const router = express.Router();
 
@@ -27,20 +28,22 @@ router.post('/', requireBrowserOrigin, requireRecaptcha(), optionalCustomerAuth,
     return res.status(400).json({ error: 'Please enter a valid Nigerian phone number.' });
   }
   try {
-    const order = await createOrderRecord({
+    const { orders } = await createOrderRecord({
       ...req.body,
       source: 'WEB',
       authenticatedCustomerId: req.customer?.id,
     });
     res.status(201).json({
-      order,
-      payment: {
-        bankName: process.env.BANK_NAME,
-        accountName: process.env.BANK_ACCOUNT_NAME,
-        accountNumber: process.env.BANK_ACCOUNT_NUMBER,
-        amount: order.total,
-        narration: order.narration,
-      },
+      orders: orders.map((order) => ({
+        order,
+        payment: {
+          bankName: process.env.BANK_NAME,
+          accountName: process.env.BANK_ACCOUNT_NAME,
+          accountNumber: process.env.BANK_ACCOUNT_NUMBER,
+          amount: order.total,
+          narration: order.narration,
+        },
+      })),
     });
   } catch (err) {
     if (err instanceof OrderValidationError) {
@@ -49,6 +52,14 @@ router.post('/', requireBrowserOrigin, requireRecaptcha(), optionalCustomerAuth,
     console.error(err);
     res.status(500).json({ error: 'Could not create order' });
   }
+});
+
+// GET /api/orders/schedule — public, today's monthly-ordering cutoff status
+// for the landing/menu/order pages (see lib/orderSchedule.js). Mounted ahead
+// of the /:idOrNarration lookup below so "schedule" is never swallowed as an
+// order id/narration guess.
+router.get('/schedule', (req, res) => {
+  res.json(scheduleStatus());
 });
 
 // GET /api/orders/:idOrNarration — public order lookup/tracking, by internal id,
@@ -65,7 +76,19 @@ router.get('/:idOrNarration', orderLookupRateLimit, requireBrowserOrigin, async 
     include: orderIncludes,
   });
   if (!order) return res.status(404).json({ error: 'Order not found' });
-  res.json(order);
+
+  // A checkout that straddled the combo/item cutoffs produced more than one
+  // Order (see lib/orderCreation.js) — surface the other half(s) so the
+  // status page can link to them, without a second page/route for this.
+  let siblingOrders = [];
+  if (order.splitGroupId) {
+    siblingOrders = await prisma.order.findMany({
+      where: { splitGroupId: order.splitGroupId, id: { not: order.id } },
+      select: { id: true, narration: true, orderNumber: true, orderMonth: true, status: true },
+    });
+  }
+
+  res.json({ ...order, siblingOrders });
 });
 
 // POST /api/orders/:id/receipt — public, confirm payment either by uploading a
@@ -119,15 +142,27 @@ router.patch('/:id/cancel', async (req, res) => {
   res.json(updated);
 });
 
-// GET /api/admin/orders — admin list, optional ?status= filter
+// GET /api/admin/orders — admin list, optional ?status=/?month= filters
 router.get('/admin/all', requireAdmin, async (req, res) => {
-  const { status } = req.query;
+  const { status, month } = req.query;
   const orders = await prisma.order.findMany({
-    where: status ? { status } : undefined,
+    where: { ...(status && { status }), ...(month && { orderMonth: month }) },
     include: orderIncludes,
     orderBy: { createdAt: 'desc' },
   });
   res.json(orders);
+});
+
+// GET /api/admin/orders/months — distinct orderMonth values across every
+// order (regardless of the current status filter), for populating the admin
+// month-filter dropdown with months that actually have orders.
+router.get('/admin/months', requireAdmin, async (req, res) => {
+  const rows = await prisma.order.findMany({
+    distinct: ['orderMonth'],
+    select: { orderMonth: true },
+    orderBy: { orderMonth: 'desc' },
+  });
+  res.json(rows.map((r) => r.orderMonth));
 });
 
 // PATCH /api/admin/orders/:id/status — admin status transitions
@@ -202,6 +237,36 @@ router.patch('/admin/:id/location', requireAdmin, async (req, res, next) => {
     const order = await prisma.order.update({
       where: { id: req.params.id },
       data: { locationId, logisticsFee, total },
+      include: orderIncludes,
+    });
+
+    res.json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/orders/:id/month — admin re-categorizing which month's
+// batch an order belongs to (e.g. pulling a combo that missed its 10th
+// cutoff back into the current month instead of leaving it auto-batched for
+// next month — see lib/orderSchedule.js). Same DELIVERED/CANCELLED guard as
+// the location route above, for the same reason.
+router.patch('/admin/:id/month', requireAdmin, async (req, res, next) => {
+  try {
+    const { orderMonth } = req.body;
+    if (!/^\d{4}-\d{2}$/.test(orderMonth || '')) {
+      return res.status(400).json({ error: 'orderMonth must be in YYYY-MM format.' });
+    }
+
+    const existing = await prisma.order.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Order not found' });
+    if (['DELIVERED', 'CANCELLED'].includes(existing.status)) {
+      return res.status(400).json({ error: 'Cannot change the month of a delivered or cancelled order.' });
+    }
+
+    const order = await prisma.order.update({
+      where: { id: req.params.id },
+      data: { orderMonth },
       include: orderIncludes,
     });
 

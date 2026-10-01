@@ -168,14 +168,18 @@ describe('runChat — create_order tool', () => {
   test('creates the order and surfaces order meta + payment details', async () => {
     process.env.BANK_NAME = 'Test Bank';
     createOrderRecord.mockResolvedValue({
-      id: 'order1',
-      narration: 'DFM-AB12CD',
-      orderNumber: 10042,
-      status: 'PENDING_PAYMENT',
-      subtotal: 5000,
-      logisticsFee: 1000,
-      total: 6000,
-      customer: { phone: '08012345678' },
+      orders: [
+        {
+          id: 'order1',
+          narration: 'DFM-AB12CD',
+          orderNumber: 10042,
+          status: 'PENDING_PAYMENT',
+          subtotal: 5000,
+          logisticsFee: 1000,
+          total: 6000,
+          customer: { phone: '08012345678' },
+        },
+      ],
     });
     mockCreate
       .mockResolvedValueOnce(toolUseTurn([{ id: 'call1', name: 'create_order', input: ORDER_INPUT }]))
@@ -196,6 +200,26 @@ describe('runChat — create_order tool', () => {
       cart: null,
       humanHandoff: null,
     });
+  });
+
+  test('a split checkout (two orders) surfaces the first order in meta, both in the tool result', async () => {
+    createOrderRecord.mockResolvedValue({
+      orders: [
+        { id: 'order-combo', narration: 'DFM-AAAAAA', orderNumber: 1, status: 'PENDING_PAYMENT', total: 5000, customer: { phone: '08012345678' } },
+        { id: 'order-item', narration: 'DFM-BBBBBB', orderNumber: 2, status: 'PENDING_PAYMENT', total: 6000, customer: { phone: '08012345678' } },
+      ],
+    });
+    mockCreate
+      .mockResolvedValueOnce(toolUseTurn([{ id: 'call1', name: 'create_order', input: ORDER_INPUT }]))
+      .mockResolvedValueOnce(textTurn('Your order was split into two!'));
+
+    const { messages, meta } = await runChat([{ role: 'user', content: 'confirm order' }]);
+
+    expect(meta.orderId).toBe('order-combo');
+    const toolResultMsg = messages.find((m) => m.role === 'user' && m.content[0]?.type === 'tool_result');
+    const parsed = JSON.parse(toolResultMsg.content[0].content);
+    expect(parsed.split).toBe(true);
+    expect(parsed.orders.map((o) => o.id)).toEqual(['order-combo', 'order-item']);
   });
 
   test('a declined order (OrderValidationError) returns a tool error, no meta is set', async () => {

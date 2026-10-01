@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { SendMailClient } = require('zeptomail');
 const { getFrontendOrigins } = require('./frontendOrigins');
+const { COMBO_CUTOFF_DAY, ITEM_CUTOFF_DAY, ordinalDay } = require('./orderSchedule');
 const prisma = require('../db');
 
 const nairaFormatter = new Intl.NumberFormat('en-NG', {
@@ -280,6 +281,17 @@ function goLiveMenuStackHtml() {
   return { html, inlineImages };
 }
 
+// Limited-time launch incentive — a terracotta callout (matching the
+// schedule box below) so it reads as the one urgent thing here, right under
+// the greeting before anything else competes for attention.
+function goLivePromoHtml() {
+  return `<table role="presentation" style="width:100%;background:#fbf1e9;border:1px solid rgba(196,101,47,0.25);border-radius:14px;margin:0 0 22px;">
+    <tr><td style="padding:16px 20px;text-align:center;">
+      <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:14.5px;font-weight:800;color:#a44f22;">🎁 Special package awaits the first 10 orders placed!</p>
+    </td></tr>
+  </table>`;
+}
+
 // Just a taste of the menu, not the whole thing — "and many more" covers
 // the rest. A fixed hand-picked lineup (not pulled from the live catalog)
 // per idea_pad/todo.md.
@@ -327,15 +339,16 @@ function goLiveFeaturesHtml() {
     <p style="margin:0 0 22px;font-size:13px;font-style:italic;color:#7a897e;">...and plenty more we&rsquo;re cooking up.</p>`;
 }
 
-// Monthly cutoff dates — every order window closes on the 15th, combo
-// (group) order requests close earlier on the 10th since they take more
-// prep lead time; anything placed after either date rolls into next
-// month's batch instead of being rejected outright. Terracotta-tinted
-// (vs. the mist-green panels above) so a deadline reads as the one thing
-// here worth pausing on.
+// Monthly cutoff dates, from lib/orderSchedule.js (the single source of
+// truth these numbers also drive order-month assignment from) — every order
+// window closes on the 15th, combo (group) order requests close earlier on
+// the 10th since they take more prep lead time; anything placed after either
+// date rolls into next month's batch instead of being rejected outright.
+// Terracotta-tinted (vs. the mist-green panels above) so a deadline reads as
+// the one thing here worth pausing on.
 const GO_LIVE_SCHEDULE = [
-  { day: '10th', label: 'Combo order requests close' },
-  { day: '15th', label: 'Ordering closes for the month' },
+  { day: ordinalDay(COMBO_CUTOFF_DAY), label: 'Combo order requests close' },
+  { day: ordinalDay(ITEM_CUTOFF_DAY), label: 'Ordering closes for the month' },
 ];
 
 function goLiveScheduleHtml() {
@@ -367,6 +380,7 @@ function goLiveEmailHtml({ name, link }) {
       <p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:#33443a;">
         The wait is over — dánọ́fúnmi is officially open for orders. Pick your favorites, any combination, and we&rsquo;ll cook it fresh and have it delivered to you.
       </p>
+      ${goLivePromoHtml()}
       ${photoStack}
       ${goLiveMenuListHtml()}
       <table role="presentation" style="width:100%;margin:4px 0 22px;">

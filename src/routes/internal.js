@@ -14,16 +14,18 @@ router.use(requireInternalKey);
 // POST /api/internal/orders — bot creates an order from a chat conversation
 router.post('/orders', async (req, res) => {
   try {
-    const order = await createOrderRecord({ ...req.body, source: 'WHATSAPP' });
+    const { orders } = await createOrderRecord({ ...req.body, source: 'WHATSAPP' });
     res.status(201).json({
-      order,
-      payment: {
-        bankName: process.env.BANK_NAME,
-        accountName: process.env.BANK_ACCOUNT_NAME,
-        accountNumber: process.env.BANK_ACCOUNT_NUMBER,
-        amount: order.total,
-        narration: order.narration,
-      },
+      orders: orders.map((order) => ({
+        order,
+        payment: {
+          bankName: process.env.BANK_NAME,
+          accountName: process.env.BANK_ACCOUNT_NAME,
+          accountNumber: process.env.BANK_ACCOUNT_NUMBER,
+          amount: order.total,
+          narration: order.narration,
+        },
+      })),
     });
   } catch (err) {
     if (err instanceof OrderValidationError) {

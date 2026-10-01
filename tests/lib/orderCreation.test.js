@@ -6,7 +6,7 @@ jest.mock('../../src/db', () => ({
   menuGroup: { findMany: jest.fn() },
   customer: { upsert: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
   location: { findUnique: jest.fn() },
-  order: { create: jest.fn() },
+  order: { create: jest.fn(), updateMany: jest.fn() },
 }));
 
 const prisma = require('../../src/db');
@@ -394,7 +394,7 @@ describe('createOrderRecord', () => {
       .mockRejectedValueOnce(Object.assign(new Error('collision'), { code: 'P2002' }))
       .mockResolvedValueOnce({ id: 'order1' });
 
-    const order = await createOrderRecord({
+    const { orders } = await createOrderRecord({
       customerName: 'Jane Doe',
       customerPhone: '08012345678',
       deliveryAddress: '1 Market Rd',
@@ -402,7 +402,7 @@ describe('createOrderRecord', () => {
       items: [{ menuItemOptionId: 'opt-buka-5l', quantity: 1 }],
     });
 
-    expect(order).toEqual({ id: 'order1' });
+    expect(orders).toEqual([{ id: 'order1' }]);
     expect(prisma.order.create).toHaveBeenCalledTimes(3);
     // Each retry gets a fresh narration/orderNumber, not a repeat of the failed one.
     const narrations = prisma.order.create.mock.calls.map((c) => c[0].data.narration);
@@ -443,5 +443,138 @@ describe('createOrderRecord', () => {
       })
     ).rejects.toThrow('DB is down');
     expect(prisma.order.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createOrderRecord — monthly schedule / splitting', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  function mockNow(year, month, day) {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(year, month - 1, day));
+  }
+
+  test('an individual-only order on/before the 15th gets this month, no split', async () => {
+    mockNow(2026, 10, 5);
+    prisma.location.findUnique.mockResolvedValue({ id: 'loc1', active: true, logisticsFee: 1000 });
+    prisma.menuItemOption.findMany.mockResolvedValue([BUKA_STEW_OPTION]);
+    prisma.customer.upsert.mockResolvedValue({ id: 'cust1', address: '1 Market Rd', landmark: null });
+    prisma.order.create.mockResolvedValue({ id: 'order1' });
+
+    const { orders } = await createOrderRecord({
+      customerName: 'Jane Doe',
+      customerPhone: '08012345678',
+      deliveryAddress: '1 Market Rd',
+      locationId: 'loc1',
+      items: [{ menuItemOptionId: 'opt-buka-5l', quantity: 1 }],
+    });
+
+    expect(orders).toHaveLength(1);
+    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-10');
+    expect(prisma.order.updateMany).not.toHaveBeenCalled();
+  });
+
+  test('an individual-only order after the 15th rolls into next month', async () => {
+    mockNow(2026, 10, 20);
+    prisma.location.findUnique.mockResolvedValue({ id: 'loc1', active: true, logisticsFee: 1000 });
+    prisma.menuItemOption.findMany.mockResolvedValue([BUKA_STEW_OPTION]);
+    prisma.customer.upsert.mockResolvedValue({ id: 'cust1', address: '1 Market Rd', landmark: null });
+    prisma.order.create.mockResolvedValue({ id: 'order1' });
+
+    await createOrderRecord({
+      customerName: 'Jane Doe',
+      customerPhone: '08012345678',
+      deliveryAddress: '1 Market Rd',
+      locationId: 'loc1',
+      items: [{ menuItemOptionId: 'opt-buka-5l', quantity: 1 }],
+    });
+
+    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-11');
+  });
+
+  test('a combo-only order uses the stricter 10th cutoff', async () => {
+    mockNow(2026, 10, 12); // past the 10th, not past the 15th
+    prisma.location.findUnique.mockResolvedValue({ id: 'loc1', active: true, logisticsFee: 1000 });
+    prisma.menuGroup.findMany.mockResolvedValue([FAMILY_COMBO_GROUP]);
+    prisma.customer.upsert.mockResolvedValue({ id: 'cust1', address: '1 Market Rd', landmark: null });
+    prisma.order.create.mockResolvedValue({ id: 'order1' });
+
+    await createOrderRecord({
+      customerName: 'Jane Doe',
+      customerPhone: '08012345678',
+      deliveryAddress: '1 Market Rd',
+      locationId: 'loc1',
+      items: [{ menuGroupId: 'grp-family', quantity: 1 }],
+    });
+
+    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-11');
+  });
+
+  test('a mixed cart before both cutoffs stays a single order', async () => {
+    mockNow(2026, 10, 5);
+    prisma.location.findUnique.mockResolvedValue({ id: 'loc1', active: true, logisticsFee: 1000 });
+    prisma.menuItemOption.findMany.mockResolvedValue([BUKA_STEW_OPTION]);
+    prisma.menuGroup.findMany.mockResolvedValue([FAMILY_COMBO_GROUP]);
+    prisma.customer.upsert.mockResolvedValue({ id: 'cust1', address: '1 Market Rd', landmark: null });
+    prisma.order.create.mockResolvedValue({ id: 'order1' });
+
+    const { orders } = await createOrderRecord({
+      customerName: 'Jane Doe',
+      customerPhone: '08012345678',
+      deliveryAddress: '1 Market Rd',
+      locationId: 'loc1',
+      items: [
+        { menuItemOptionId: 'opt-buka-5l', quantity: 1 },
+        { menuGroupId: 'grp-family', quantity: 1 },
+      ],
+    });
+
+    expect(orders).toHaveLength(1);
+    expect(prisma.order.create).toHaveBeenCalledTimes(1);
+    const data = prisma.order.create.mock.calls[0][0].data;
+    expect(data.orderMonth).toBe('2026-10');
+    expect(data.items.create).toHaveLength(2);
+    expect(prisma.order.updateMany).not.toHaveBeenCalled();
+  });
+
+  test('a mixed cart between the two cutoffs splits into two orders, each with its own fee', async () => {
+    mockNow(2026, 10, 12); // past combo cutoff (10th), not past item cutoff (15th)
+    prisma.location.findUnique.mockResolvedValue({ id: 'loc1', active: true, logisticsFee: 1000 });
+    prisma.menuItemOption.findMany.mockResolvedValue([BUKA_STEW_OPTION]);
+    prisma.menuGroup.findMany.mockResolvedValue([FAMILY_COMBO_GROUP]);
+    prisma.customer.upsert.mockResolvedValue({ id: 'cust1', address: '1 Market Rd', landmark: null });
+    prisma.order.create.mockResolvedValueOnce({ id: 'order-combo' }).mockResolvedValueOnce({ id: 'order-item' });
+    prisma.order.updateMany.mockResolvedValue({ count: 2 });
+
+    const { orders } = await createOrderRecord({
+      customerName: 'Jane Doe',
+      customerPhone: '08012345678',
+      deliveryAddress: '1 Market Rd',
+      locationId: 'loc1',
+      items: [
+        { menuGroupId: 'grp-family', quantity: 1 },
+        { menuItemOptionId: 'opt-buka-5l', quantity: 1 },
+      ],
+    });
+
+    expect(prisma.order.create).toHaveBeenCalledTimes(2);
+    const [comboCall, itemCall] = prisma.order.create.mock.calls;
+    expect(comboCall[0].data.orderMonth).toBe('2026-11'); // combo rolled over past its 10th cutoff
+    expect(comboCall[0].data.items.create).toHaveLength(1);
+    expect(comboCall[0].data.logisticsFee).toBe(1000); // its own full fee — a separate delivery
+    expect(itemCall[0].data.orderMonth).toBe('2026-10'); // item line still inside its own cutoff
+    expect(itemCall[0].data.items.create).toHaveLength(1);
+    expect(itemCall[0].data.logisticsFee).toBe(1000);
+
+    expect(prisma.order.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['order-combo', 'order-item'] } },
+      data: { splitGroupId: 'order-combo' },
+    });
+    expect(orders).toEqual([
+      { id: 'order-combo', splitGroupId: 'order-combo' },
+      { id: 'order-item', splitGroupId: 'order-combo' },
+    ]);
   });
 });

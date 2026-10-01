@@ -148,7 +148,7 @@ describe('createFirstTasteOrder', () => {
     prisma.menuCategory.upsert.mockResolvedValue({ id: 'cat1' });
     prisma.menuItem.upsert.mockResolvedValue({ id: 'item1' });
     prisma.menuItemOption.upsert.mockResolvedValue({ id: 'opt1' });
-    createOrderRecord.mockResolvedValue({ id: 'order1', narration: 'DFM-AB12CD' });
+    createOrderRecord.mockResolvedValue({ orders: [{ id: 'order1', narration: 'DFM-AB12CD' }] });
     prisma.order.update.mockResolvedValue({
       id: 'order1',
       narration: 'DFM-AB12CD',
@@ -191,7 +191,7 @@ describe('createFirstTasteOrder', () => {
     prisma.menuCategory.upsert.mockResolvedValue({ id: 'cat1' });
     prisma.menuItem.upsert.mockResolvedValue({ id: 'item1' });
     prisma.menuItemOption.upsert.mockResolvedValue({ id: 'opt1' });
-    createOrderRecord.mockResolvedValue({ id: 'order1', narration: 'DFM-AB12CD' });
+    createOrderRecord.mockResolvedValue({ orders: [{ id: 'order1', narration: 'DFM-AB12CD' }] });
     const confirmedOrder = { id: 'order1', narration: 'DFM-AB12CD', status: 'CONFIRMED', customer: { id: 'cust-old' } };
     prisma.order.update.mockResolvedValue(confirmedOrder);
     prisma.interestRegistration.update.mockResolvedValue({});

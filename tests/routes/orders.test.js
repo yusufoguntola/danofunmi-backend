@@ -1,5 +1,5 @@
 jest.mock('../../src/db', () => ({
-  order: { findFirst: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+  order: { findFirst: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
   location: { findUnique: jest.fn() },
   paymentReceipt: { create: jest.fn(), update: jest.fn() },
   $transaction: jest.fn(),
@@ -61,11 +61,28 @@ describe('POST /api/orders', () => {
 
   test('201 with order + payment details on success', async () => {
     process.env.BANK_NAME = 'Test Bank';
-    createOrderRecord.mockResolvedValue({ id: 'order1', narration: 'DFM-AB12CD', total: 6000 });
+    createOrderRecord.mockResolvedValue({ orders: [{ id: 'order1', narration: 'DFM-AB12CD', total: 6000 }] });
     const res = await request(buildApp()).post('/api/orders').send(VALID_BODY);
     expect(res.status).toBe(201);
-    expect(res.body.payment).toMatchObject({ bankName: 'Test Bank', amount: 6000, narration: 'DFM-AB12CD' });
+    expect(res.body.orders).toHaveLength(1);
+    expect(res.body.orders[0].payment).toMatchObject({ bankName: 'Test Bank', amount: 6000, narration: 'DFM-AB12CD' });
+    expect(res.body.orders[0].order).toMatchObject({ id: 'order1' });
     expect(createOrderRecord).toHaveBeenCalledWith(expect.objectContaining({ ...VALID_BODY, source: 'WEB' }));
+  });
+
+  test('201 with two orders when checkout split across the cutoff', async () => {
+    createOrderRecord.mockResolvedValue({
+      orders: [
+        { id: 'order-combo', narration: 'DFM-AAAAAA', total: 5000, orderMonth: '2026-11' },
+        { id: 'order-item', narration: 'DFM-BBBBBB', total: 6000, orderMonth: '2026-10' },
+      ],
+    });
+    const res = await request(buildApp()).post('/api/orders').send(VALID_BODY);
+    expect(res.status).toBe(201);
+    expect(res.body.orders).toHaveLength(2);
+    expect(res.body.orders.map((o) => o.order.id)).toEqual(['order-combo', 'order-item']);
+    expect(res.body.orders[0].payment.narration).toBe('DFM-AAAAAA');
+    expect(res.body.orders[1].payment.narration).toBe('DFM-BBBBBB');
   });
 
   test('400 on an OrderValidationError', async () => {
@@ -83,6 +100,19 @@ describe('POST /api/orders', () => {
   });
 });
 
+describe('GET /api/orders/schedule', () => {
+  test('200 with today\'s cutoff status', async () => {
+    const res = await request(buildApp()).get('/api/orders/schedule');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      itemCutoffDay: 15,
+      comboCutoffDay: 10,
+      itemOrderMonth: expect.any(String),
+      comboOrderMonth: expect.any(String),
+    });
+  });
+});
+
 describe('GET /api/orders/:idOrNarration', () => {
   test('404 when not found', async () => {
     prisma.order.findFirst.mockResolvedValue(null);
@@ -95,6 +125,21 @@ describe('GET /api/orders/:idOrNarration', () => {
     const res = await request(buildApp()).get('/api/orders/DFM-AB12CD');
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: 'order1' });
+    expect(res.body.siblingOrders).toEqual([]);
+  });
+
+  test('includes siblingOrders when the order was part of a split checkout', async () => {
+    prisma.order.findFirst.mockResolvedValue({ id: 'order1', narration: 'DFM-AB12CD', splitGroupId: 'order1' });
+    prisma.order.findMany.mockResolvedValue([{ id: 'order2', narration: 'DFM-ZZ9999', orderMonth: '2026-11' }]);
+
+    const res = await request(buildApp()).get('/api/orders/DFM-AB12CD');
+
+    expect(res.status).toBe(200);
+    expect(prisma.order.findMany).toHaveBeenCalledWith({
+      where: { splitGroupId: 'order1', id: { not: 'order1' } },
+      select: { id: true, narration: true, orderNumber: true, orderMonth: true, status: true },
+    });
+    expect(res.body.siblingOrders).toEqual([{ id: 'order2', narration: 'DFM-ZZ9999', orderMonth: '2026-11' }]);
   });
 
   test('matches numerically by order number too', async () => {
@@ -166,13 +211,76 @@ describe('GET /api/admin/orders (mounted at /admin/all)', () => {
     prisma.order.findMany.mockResolvedValue([{ id: 'o1' }]);
     const res = await request(buildApp()).get('/api/orders/admin/all');
     expect(res.status).toBe(200);
-    expect(prisma.order.findMany.mock.calls[0][0].where).toBeUndefined();
+    expect(prisma.order.findMany.mock.calls[0][0].where).toEqual({});
   });
 
   test('filters by status when given', async () => {
     prisma.order.findMany.mockResolvedValue([]);
     await request(buildApp()).get('/api/orders/admin/all?status=DELIVERED');
     expect(prisma.order.findMany.mock.calls[0][0].where).toEqual({ status: 'DELIVERED' });
+  });
+
+  test('filters by month when given', async () => {
+    prisma.order.findMany.mockResolvedValue([]);
+    await request(buildApp()).get('/api/orders/admin/all?month=2026-10');
+    expect(prisma.order.findMany.mock.calls[0][0].where).toEqual({ orderMonth: '2026-10' });
+  });
+
+  test('combines status and month filters', async () => {
+    prisma.order.findMany.mockResolvedValue([]);
+    await request(buildApp()).get('/api/orders/admin/all?status=DELIVERED&month=2026-10');
+    expect(prisma.order.findMany.mock.calls[0][0].where).toEqual({ status: 'DELIVERED', orderMonth: '2026-10' });
+  });
+});
+
+describe('GET /api/admin/orders/months (mounted at /admin/months)', () => {
+  test('returns distinct orderMonth values, newest first', async () => {
+    prisma.order.findMany.mockResolvedValue([{ orderMonth: '2026-10' }, { orderMonth: '2026-09' }]);
+    const res = await request(buildApp()).get('/api/orders/admin/months');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(['2026-10', '2026-09']);
+    expect(prisma.order.findMany).toHaveBeenCalledWith({
+      distinct: ['orderMonth'],
+      select: { orderMonth: true },
+      orderBy: { orderMonth: 'desc' },
+    });
+  });
+});
+
+describe('PATCH /api/admin/orders/:id/month', () => {
+  test('400 on a malformed orderMonth', async () => {
+    const res = await request(buildApp()).patch('/api/orders/admin/order1/month').send({ orderMonth: 'October' });
+    expect(res.status).toBe(400);
+  });
+
+  test('404 when the order does not exist', async () => {
+    prisma.order.findUnique.mockResolvedValue(null);
+    const res = await request(buildApp()).patch('/api/orders/admin/order1/month').send({ orderMonth: '2026-10' });
+    expect(res.status).toBe(404);
+  });
+
+  test('400 when the order is already DELIVERED/CANCELLED', async () => {
+    prisma.order.findUnique.mockResolvedValue({ id: 'order1', status: 'CANCELLED' });
+    const res = await request(buildApp()).patch('/api/orders/admin/order1/month').send({ orderMonth: '2026-10' });
+    expect(res.status).toBe(400);
+  });
+
+  test('updates orderMonth', async () => {
+    prisma.order.findUnique.mockResolvedValue({ id: 'order1', status: 'CONFIRMED' });
+    prisma.order.update.mockResolvedValue({ id: 'order1', orderMonth: '2026-10' });
+
+    const res = await request(buildApp()).patch('/api/orders/admin/order1/month').send({ orderMonth: '2026-10' });
+
+    expect(res.status).toBe(200);
+    expect(prisma.order.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'order1' }, data: { orderMonth: '2026-10' } })
+    );
+  });
+
+  test('a DB error reaches the error handler via next(err)', async () => {
+    prisma.order.findUnique.mockRejectedValue(new Error('DB down'));
+    const res = await request(buildApp()).patch('/api/orders/admin/order1/month').send({ orderMonth: '2026-10' });
+    expect(res.status).toBe(500);
   });
 });
 

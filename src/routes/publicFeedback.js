@@ -22,14 +22,15 @@ function firstName(full) {
   return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
-// GET /api/feedback — public. The most recent feedback that carries a written
+// GET /api/feedback — public. The top-rated feedback that carries a written
 // comment, for the landing page "what customers say" section. Ratings-only
-// feedback (no comment) is left for the admin dashboard.
+// feedback (no comment) is left for the admin dashboard. Admin can hide an
+// individual row from here via visibleOnLanding without soft-deleting it.
 router.get('/', async (req, res, next) => {
   try {
     const rows = await prisma.feedback.findMany({
-      where: { comment: { not: null }, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
+      where: { comment: { not: null }, deletedAt: null, visibleOnLanding: true },
+      orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
       take: 30,
       include: { order: { select: { customer: { select: { name: true } } } } },
     });

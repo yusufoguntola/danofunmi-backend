@@ -59,6 +59,17 @@ describe('GET /api/feedback', () => {
     const res = await request(buildApp()).get('/api/feedback');
     expect(res.status).toBe(500);
   });
+
+  test('filters to visibleOnLanding and ranks by rating first, then recency', async () => {
+    prisma.feedback.findMany.mockResolvedValue([]);
+    await request(buildApp()).get('/api/feedback');
+    expect(prisma.feedback.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { comment: { not: null }, deletedAt: null, visibleOnLanding: true },
+        orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
+      })
+    );
+  });
 });
 
 describe('GET /api/feedback/order/:idOrNarration', () => {

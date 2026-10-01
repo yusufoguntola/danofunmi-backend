@@ -2,6 +2,7 @@ const prisma = require('../db');
 const { generateNarration } = require('./narration');
 const { generateOrderNumber } = require('./orderNumber');
 const { computeDiscountAmount } = require('./menuCatalog');
+const { ITEM_CUTOFF_DAY, computeOrderMonth, partitionLineItemsByCutoff } = require('./orderSchedule');
 
 class OrderValidationError extends Error {}
 
@@ -167,10 +168,8 @@ async function createOrderRecord({
     throw new OrderValidationError('Selected location is not available');
   }
 
-  const { lineItems, subtotal } = await priceItems(items);
-
+  const { lineItems } = await priceItems(items);
   const logisticsFee = Number(location.logisticsFee);
-  const total = subtotal + logisticsFee;
 
   // A signed-in order links to that account by id — never by re-upserting on
   // phone, which could detach it from the account (a Google signup may have
@@ -209,22 +208,46 @@ async function createOrderRecord({
     customer = await prisma.customer.update({ where: { id: customer.id }, data: customerPatch });
   }
 
-  return createOrderWithUniqueNarration(
-    {
-      customerId: customer.id,
-      locationId,
-      deliveryAddress,
-      landmark: landmark || null,
-      subtotal,
-      logisticsFee,
-      total,
-      source,
-      notes,
-      statusUpdatedAt: new Date(),
-      items: { create: lineItems },
-    },
-    { items: true, location: true, customer: true }
-  );
+  // A cart of only individual items or only a combo always stays one Order.
+  // One mixing both only splits into two Orders when the combo and
+  // individual-item lines actually resolve to different processing months
+  // (placed after the 10th but on/before the 15th) — each half then needs
+  // its own narration/payment reference and its own full logistics fee,
+  // since it's genuinely a separate delivery run. See lib/orderSchedule.js.
+  const groups = partitionLineItemsByCutoff(lineItems);
+
+  const orders = [];
+  for (const group of groups) {
+    const groupSubtotal = group.lines.reduce((sum, l) => sum + l.lineTotal, 0);
+    const order = await createOrderWithUniqueNarration(
+      {
+        customerId: customer.id,
+        locationId,
+        deliveryAddress,
+        landmark: landmark || null,
+        subtotal: groupSubtotal,
+        logisticsFee,
+        total: groupSubtotal + logisticsFee,
+        orderMonth: group.orderMonth,
+        source,
+        notes,
+        statusUpdatedAt: new Date(),
+        items: { create: group.lines },
+      },
+      { items: true, location: true, customer: true }
+    );
+    orders.push(order);
+  }
+
+  if (orders.length > 1) {
+    const splitGroupId = orders[0].id;
+    await prisma.order.updateMany({ where: { id: { in: orders.map((o) => o.id) } }, data: { splitGroupId } });
+    orders.forEach((o) => {
+      o.splitGroupId = splitGroupId;
+    });
+  }
+
+  return { orders };
 }
 
 /**
@@ -311,6 +334,10 @@ async function createAdminCustomOrder({
       subtotal,
       logisticsFee,
       total: finalTotal,
+      // Admin-authored lines are always free-text, never a real combo
+      // (menuGroupId is always null here) — so only the item cutoff ever
+      // applies, and this never needs to split across months.
+      orderMonth: computeOrderMonth(ITEM_CUTOFF_DAY).orderMonth,
       source: source || 'WEB_CHAT',
       notes: notes || null,
       statusUpdatedAt: new Date(),

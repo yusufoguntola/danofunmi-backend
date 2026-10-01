@@ -35,13 +35,14 @@ beforeEach(() => jest.clearAllMocks());
 describe('POST /api/internal/orders', () => {
   test('201 with order + payment details on success', async () => {
     process.env.BANK_NAME = 'Test Bank';
-    createOrderRecord.mockResolvedValue({ id: 'order1', narration: 'DFM-AB12CD', total: 6000 });
+    createOrderRecord.mockResolvedValue({ orders: [{ id: 'order1', narration: 'DFM-AB12CD', total: 6000 }] });
 
     const res = await request(buildApp()).post('/api/internal/orders').send({ customerName: 'Jane' });
 
     expect(res.status).toBe(201);
-    expect(res.body.order).toMatchObject({ id: 'order1' });
-    expect(res.body.payment).toMatchObject({ bankName: 'Test Bank', amount: 6000, narration: 'DFM-AB12CD' });
+    expect(res.body.orders).toHaveLength(1);
+    expect(res.body.orders[0].order).toMatchObject({ id: 'order1' });
+    expect(res.body.orders[0].payment).toMatchObject({ bankName: 'Test Bank', amount: 6000, narration: 'DFM-AB12CD' });
     expect(createOrderRecord).toHaveBeenCalledWith(expect.objectContaining({ customerName: 'Jane', source: 'WHATSAPP' }));
   });
 

@@ -93,7 +93,9 @@ async function createFirstTasteOrder(registration, locationId) {
 
   const optionId = await ensureFirstTasteMenuOption();
 
-  let order = await createOrderRecord({
+  // Always a single individual-item line, so createOrderRecord never splits
+  // it — safe to take the one order it returns.
+  const { orders } = await createOrderRecord({
     customerName: registration.name,
     customerPhone: registration.phone,
     deliveryAddress: registration.address,
@@ -103,6 +105,7 @@ async function createFirstTasteOrder(registration, locationId) {
     source: 'WEB',
     notes: 'First-taste offer — created from the coming-soon interest list.',
   });
+  let order = orders[0];
 
   // Free, nothing to pay — go straight to confirmed so it flows into the
   // standard packed / out-for-delivery / delivered pipeline.

@@ -162,6 +162,18 @@ model Order {
   outForDeliveryAt DateTime?
   deliveredAt      DateTime?
   cancelledAt      DateTime?
+  // 'YYYY-MM' — which month's batch this order is processed/delivered in,
+  // set at creation from lib/orderSchedule.js's cutoff rule (auto-categorized
+  // from the submission date) and editable by admin afterward. See
+  // splitGroupId below for why a single checkout can produce more than one
+  // Order with different orderMonth values.
+  orderMonth       String
+  // Set (identically, to the first order's own id) on every Order created
+  // from the same checkout when a cart's combo and individual-item lines
+  // resolved to different orderMonths and had to be split into separate
+  // Orders (own narration/payment/delivery each) — see lib/orderCreation.js.
+  // Null for an ordinary, unsplit order.
+  splitGroupId     String?
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 
@@ -170,6 +182,8 @@ model Order {
   items    OrderItem[]
   receipts PaymentReceipt[]
   feedback Feedback[]
+
+  @@index([orderMonth])
 }
 
 model OrderItem {
@@ -224,6 +238,11 @@ model Feedback {
   customerName String?
   location     String?
   foodType     String?
+  // Admin opt-out for the landing page's "what customers say" section —
+  // independent of deletedAt, which hides a row everywhere (including the
+  // admin list). Defaults true so existing/new feedback stays visible unless
+  // an admin explicitly hides it.
+  visibleOnLanding Boolean   @default(true)
   deletedAt    DateTime?
   createdAt    DateTime  @default(now())
 
