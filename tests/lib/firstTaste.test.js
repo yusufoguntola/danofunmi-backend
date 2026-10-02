@@ -34,7 +34,11 @@ describe('ensureFirstTasteMenuOption', () => {
       expect.objectContaining({ where: { name: 'Promotions' } })
     );
     expect(prisma.menuItem.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { name: 'First Taste' }, create: expect.objectContaining({ categoryId: 'cat1' }) })
+      expect.objectContaining({
+        where: { name: 'First Taste' },
+        create: expect.objectContaining({ categoryId: 'cat1', hiddenFromCatalog: true }),
+        update: {}, // never re-hides it if an admin has since made it visible
+      })
     );
     expect(prisma.menuItemOption.upsert).toHaveBeenCalledWith(
       expect.objectContaining({

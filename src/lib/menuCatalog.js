@@ -1,12 +1,5 @@
 const prisma = require('../db');
 
-// Categories that exist for internal/admin-triggered orders only (e.g. the
-// free "First Taste" item created for shortlisted interest registrations,
-// see lib/firstTaste.js) and must never appear in the public catalog or the
-// AI ordering chat's menu awareness — customers can't add them to a cart
-// themselves.
-const HIDDEN_CATEGORIES = ['Promotions'];
-
 // A MenuItem/MenuGroup `icon` is either an emoji/text glyph or a real
 // uploaded/generated photo (see routes/menu.js's icon upload/generate
 // endpoints) — mirrors frontend/src/components/MenuIcon.jsx's own copy of
@@ -58,10 +51,14 @@ function shapeGroup(group) {
   };
 }
 
-/** Active menu items, catalog-shaped with an explicit `type: 'item'`. */
+/** Active menu items, catalog-shaped with an explicit `type: 'item'`. Any
+ * category can now freely mix public and admin-only items — an item opts
+ * out of the public catalog/AI chat individually via `hiddenFromCatalog`
+ * (e.g. the free "First Taste" item — see lib/firstTaste.js), not by which
+ * category it's filed under. */
 async function listActiveItems() {
   const items = await prisma.menuItem.findMany({
-    where: { active: true, category: { name: { notIn: HIDDEN_CATEGORIES } } },
+    where: { active: true, hiddenFromCatalog: false },
     orderBy: { createdAt: 'asc' },
     include: {
       category: true,
@@ -82,7 +79,7 @@ async function listActiveItems() {
 /** Active menu groups (combos), catalog-shaped with computed totals. */
 async function listActiveGroups() {
   const groups = await prisma.menuGroup.findMany({
-    where: { active: true, category: { name: { notIn: HIDDEN_CATEGORIES } } },
+    where: { active: true },
     orderBy: { createdAt: 'asc' },
     include: {
       category: true,
@@ -115,6 +112,5 @@ module.exports = {
   listPhotoItems,
   shapeGroup,
   computeDiscountAmount,
-  HIDDEN_CATEGORIES,
   IMAGE_ICON_RE,
 };

@@ -4,7 +4,7 @@ jest.mock('../../src/db', () => ({
 }));
 
 const prisma = require('../../src/db');
-const { computeDiscountAmount, shapeGroup, listActiveItems, listActiveGroups, getCatalog, HIDDEN_CATEGORIES } = require('../../src/lib/menuCatalog');
+const { computeDiscountAmount, shapeGroup, listActiveItems, listActiveGroups, getCatalog } = require('../../src/lib/menuCatalog');
 
 describe('computeDiscountAmount', () => {
   test('no discount configured → 0', () => {
@@ -92,7 +92,7 @@ describe('shapeGroup', () => {
 describe('listActiveItems', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  test('queries active items outside the hidden categories, catalog-shapes them', async () => {
+  test('queries active, non-catalog-hidden items (any category), catalog-shapes them', async () => {
     prisma.menuItem.findMany.mockResolvedValue([
       {
         id: 'item1',
@@ -108,7 +108,7 @@ describe('listActiveItems', () => {
 
     expect(prisma.menuItem.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { active: true, category: { name: { notIn: HIDDEN_CATEGORIES } } },
+        where: { active: true, hiddenFromCatalog: false },
       })
     );
     expect(items).toEqual([
@@ -134,12 +134,12 @@ describe('listActiveItems', () => {
 describe('listActiveGroups', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  test('queries active groups outside hidden categories, shapes them', async () => {
+  test('queries active groups (any category), shapes them', async () => {
     prisma.menuGroup.findMany.mockResolvedValue([RAW_GROUP]);
     const groups = await listActiveGroups();
 
     expect(prisma.menuGroup.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { active: true, category: { name: { notIn: HIDDEN_CATEGORIES } } } })
+      expect.objectContaining({ where: { active: true } })
     );
     expect(groups).toEqual([shapeGroup(RAW_GROUP)]);
   });

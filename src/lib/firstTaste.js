@@ -5,12 +5,15 @@
 const prisma = require('../db');
 const { createOrderRecord, OrderValidationError } = require('./orderCreation');
 const { notifyOrderStatusChange } = require('./orderNotifications');
-const { HIDDEN_CATEGORIES } = require('./menuCatalog');
 
-// Filed under a HIDDEN_CATEGORIES category (see menuCatalog.js) so it never
-// shows up in the public menu or AI chat catalog — only ever ordered via
-// createFirstTasteOrder below, never added to a cart by a customer directly.
-const CATEGORY_NAME = HIDDEN_CATEGORIES[0];
+// Created with hiddenFromCatalog: true (see menuCatalog.js's listActiveItems)
+// so it never shows up in the public menu or AI chat catalog — only ever
+// ordered via createFirstTasteOrder below, never added to a cart by a
+// customer directly. An admin can still toggle it visible from the menu
+// item's edit page if they ever want to; this only sets the flag on first
+// creation, never overwrites an admin's own choice on later calls (the
+// upsert's `update` is a no-op).
+const CATEGORY_NAME = 'Promotions';
 const ITEM_NAME = 'First Taste';
 const OPTION_SIZE = 'Standard';
 
@@ -30,6 +33,7 @@ async function ensureFirstTasteMenuOption() {
       categoryId: category.id,
       description: 'Your free first taste of dánọ́fúnmi — on the house.',
       active: true,
+      hiddenFromCatalog: true,
     },
   });
 

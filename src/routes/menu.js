@@ -150,14 +150,14 @@ router.post('/admin', requireAdmin, async (req, res) => {
   }
 });
 
-// PATCH /api/menu/admin/:id — update name/category/description/icon/active
+// PATCH /api/menu/admin/:id — update name/category/description/icon/active/hiddenFromCatalog
 router.patch('/admin/:id', requireAdmin, async (req, res) => {
-  const { name, categoryId, description, icon, active } = req.body;
+  const { name, categoryId, description, icon, active, hiddenFromCatalog } = req.body;
 
   try {
     const item = await prisma.menuItem.update({
       where: { id: req.params.id },
-      data: { name, categoryId, description, icon, active },
+      data: { name, categoryId, description, icon, active, hiddenFromCatalog },
       include: { category: true, options: true },
     });
     res.json(flattenItem(item));

@@ -82,6 +82,13 @@ model MenuItem {
   description String?
   icon        String?
   active      Boolean  @default(true)
+  // Independent of `active`/category — an admin-controlled opt-out from the
+  // public catalog/AI chat menu awareness for an otherwise-active item that
+  // still needs to exist for internal/admin-triggered ordering (e.g. the
+  // free "First Taste" item — see lib/firstTaste.js). Unlike the old
+  // category-wide HIDDEN_CATEGORIES approach this replaces, a category can
+  // now freely mix public and admin-only items.
+  hiddenFromCatalog Boolean @default(false)
   createdAt   DateTime @default(now())
 
   category   MenuCategory     @relation(fields: [categoryId], references: [id])

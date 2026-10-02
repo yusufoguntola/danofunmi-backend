@@ -247,6 +247,15 @@ describe('PATCH /api/menu/admin/:id', () => {
     const res = await request(buildApp()).patch('/api/menu/admin/item1').send({ categoryId: 'bad' });
     expect(res.status).toBe(400);
   });
+
+  test('accepts hiddenFromCatalog, independent of active/category', async () => {
+    prisma.menuItem.update.mockResolvedValue({ id: 'item1', category: { name: 'Promotions' }, options: [] });
+    const res = await request(buildApp()).patch('/api/menu/admin/item1').send({ hiddenFromCatalog: false });
+    expect(res.status).toBe(200);
+    expect(prisma.menuItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ hiddenFromCatalog: false }) })
+    );
+  });
 });
 
 describe('DELETE /api/menu/admin/:id', () => {
