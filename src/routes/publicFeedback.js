@@ -22,6 +22,11 @@ function firstName(full) {
   return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
+// Landing-page testimonials are capped at 5 — the best 5 (by rating, then
+// recency — see orderBy below) from whatever admin has left enabled via
+// visibleOnLanding always win, never just the 5 most recent.
+const LANDING_FEEDBACK_LIMIT = 5;
+
 // GET /api/feedback — public. The top-rated feedback that carries a written
 // comment, for the landing page "what customers say" section. Ratings-only
 // feedback (no comment) is left for the admin dashboard. Admin can hide an
@@ -31,13 +36,15 @@ router.get('/', async (req, res, next) => {
     const rows = await prisma.feedback.findMany({
       where: { comment: { not: null }, deletedAt: null, visibleOnLanding: true },
       orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
-      take: 30,
+      // Buffer above LANDING_FEEDBACK_LIMIT since the trim-filter below can
+      // still drop a few (a comment that's whitespace-only after trimming).
+      take: LANDING_FEEDBACK_LIMIT * 3,
       include: { order: { select: { customer: { select: { name: true } } } } },
     });
 
     const items = rows
       .filter((f) => f.comment && f.comment.trim().length > 0)
-      .slice(0, 12)
+      .slice(0, LANDING_FEEDBACK_LIMIT)
       .map((f) => ({
         id: f.id,
         rating: f.rating,

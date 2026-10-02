@@ -26,7 +26,7 @@ function buildApp() {
 beforeEach(() => jest.clearAllMocks());
 
 describe('GET /api/feedback', () => {
-  test('returns only commented, non-deleted feedback, first-name-only, capped at 12', async () => {
+  test('returns only commented, non-deleted feedback, first-name-only', async () => {
     prisma.feedback.findMany.mockResolvedValue([
       { id: 'f1', rating: 5, comment: '  Great food!  ', createdAt: new Date(), order: { customer: { name: 'Jane Doe' } } },
       { id: 'f2', rating: 4, comment: '', order: { customer: { name: 'Bob' } } }, // blank comment, filtered out
@@ -69,6 +69,23 @@ describe('GET /api/feedback', () => {
         orderBy: [{ rating: 'desc' }, { createdAt: 'desc' }],
       })
     );
+  });
+
+  test('caps the response at 5, the best 5 by the query ordering — never more', async () => {
+    prisma.feedback.findMany.mockResolvedValue(
+      Array.from({ length: 8 }, (_, i) => ({
+        id: `f${i}`,
+        rating: 5,
+        comment: `Great! #${i}`,
+        createdAt: new Date(),
+        order: null,
+      }))
+    );
+
+    const res = await request(buildApp()).get('/api/feedback');
+
+    expect(res.body).toHaveLength(5);
+    expect(res.body.map((f) => f.id)).toEqual(['f0', 'f1', 'f2', 'f3', 'f4']); // the first 5 in query order win
   });
 });
 
