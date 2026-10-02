@@ -25,7 +25,7 @@ function firstName(full) {
 // Landing-page testimonials are capped at 5 — the best 5 (by rating, then
 // recency — see orderBy below) from whatever admin has left enabled via
 // visibleOnLanding always win, never just the 5 most recent.
-const LANDING_FEEDBACK_LIMIT = 5;
+const LANDING_FEEDBACK_LIMIT = 6;
 
 // GET /api/feedback — public. The top-rated feedback that carries a written
 // comment, for the landing page "what customers say" section. Ratings-only
