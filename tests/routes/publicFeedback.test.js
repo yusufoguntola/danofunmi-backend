@@ -71,9 +71,9 @@ describe('GET /api/feedback', () => {
     );
   });
 
-  test('caps the response at 5, the best 5 by the query ordering — never more', async () => {
+  test('caps the response at LANDING_FEEDBACK_LIMIT (6), the best ones by the query ordering — never more', async () => {
     prisma.feedback.findMany.mockResolvedValue(
-      Array.from({ length: 8 }, (_, i) => ({
+      Array.from({ length: 9 }, (_, i) => ({
         id: `f${i}`,
         rating: 5,
         comment: `Great! #${i}`,
@@ -84,8 +84,8 @@ describe('GET /api/feedback', () => {
 
     const res = await request(buildApp()).get('/api/feedback');
 
-    expect(res.body).toHaveLength(5);
-    expect(res.body.map((f) => f.id)).toEqual(['f0', 'f1', 'f2', 'f3', 'f4']); // the first 5 in query order win
+    expect(res.body).toHaveLength(6);
+    expect(res.body.map((f) => f.id)).toEqual(['f0', 'f1', 'f2', 'f3', 'f4', 'f5']); // the first 6 in query order win
   });
 });
 

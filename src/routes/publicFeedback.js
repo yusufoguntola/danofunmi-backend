@@ -22,9 +22,9 @@ function firstName(full) {
   return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
-// Landing-page testimonials are capped at 5 — the best 5 (by rating, then
-// recency — see orderBy below) from whatever admin has left enabled via
-// visibleOnLanding always win, never just the 5 most recent.
+// Landing-page testimonials are capped at LANDING_FEEDBACK_LIMIT — the best
+// ones (by rating, then recency — see orderBy below) from whatever admin has
+// left enabled via visibleOnLanding always win, never just the most recent.
 const LANDING_FEEDBACK_LIMIT = 6;
 
 // GET /api/feedback — public. The top-rated feedback that carries a written
