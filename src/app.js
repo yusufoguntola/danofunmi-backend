@@ -30,6 +30,7 @@ const customerRoutes = require('./routes/customer');
 const adminCustomerRoutes = require('./routes/adminCustomers');
 const broadcastRoutes = require('./routes/broadcast');
 const adminErrorLogRoutes = require('./routes/adminErrorLogs');
+const { publicRouter: orderTimelineRoutes, adminRouter: adminOrderTimelineRoutes } = require('./routes/orderTimeline');
 const {apiRateLimit} = require('./middleware/security');
 const {decryptRequest, encryptResponse} = require('./middleware/encryption');
 const {getFrontendOrigins} = require('./lib/frontendOrigins');
@@ -108,6 +109,7 @@ app.use('/api/locations', locationRoutes);
 app.use('/api/feedback', publicFeedbackRoutes);
 app.use('/api/interest', interestRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/order-timeline', orderTimelineRoutes);
 app.use('/api/admin', authRoutes);
 app.use('/api/admin/costs', costRoutes);
 app.use('/api/admin/reports', reportRoutes);
@@ -119,6 +121,7 @@ app.use('/api/customer', customerRoutes);
 app.use('/api/admin/customers', adminCustomerRoutes);
 app.use('/api/admin/broadcast', broadcastRoutes);
 app.use('/api/admin/error-logs', adminErrorLogRoutes);
+app.use('/api/admin/order-timeline', adminOrderTimelineRoutes);
 app.use('/api/push', pushRoutes);
 
 // Internal-only, used by the whatsapp-bot service

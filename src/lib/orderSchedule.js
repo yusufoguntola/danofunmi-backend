@@ -1,8 +1,9 @@
-// The monthly ordering cutoff rule: individual menu-item lines may be
-// ordered up to the 15th of the month, combo/group-deal lines only up to the
-// 10th (they need more prep lead time) — anything submitted after its cutoff
-// is batched into next month's processing instead. Single source of truth
-// for these two numbers (also used by lib/email.js's GO_LIVE_SCHEDULE copy).
+// Fixed day-of-month cutoffs — now only the fallback for when admin hasn't
+// set an order timeline (see lib/orderTimeline.js's resolveOrderMonth, which
+// otherwise cuts off on the timeline's closing date): anything submitted
+// after the 15th is batched into next month's run. COMBO_CUTOFF_DAY no longer
+// drives ordering; it's kept only for the (already-sent) go-live email's
+// schedule copy in lib/email.js.
 const ITEM_CUTOFF_DAY = 15;
 const COMBO_CUTOFF_DAY = 10;
 
@@ -36,48 +37,6 @@ function monthLabel(key) {
   return new Date(year, month - 1, 1).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' });
 }
 
-/**
- * Groups priced order lines (as produced by lib/orderCreation.js's
- * priceItems — each already carrying menuItemId/menuGroupId) by the month
- * they resolve to. Combo lines (menuGroupId set) use the stricter
- * COMBO_CUTOFF_DAY, individual lines the ITEM_CUTOFF_DAY. Returns one group
- * in the common case; two only when the cart has both line types and they
- * resolved to different months (e.g. placed on the 12th — combos already
- * rolled to next month, individual items haven't).
- */
-function partitionLineItemsByCutoff(lineItems, now = new Date()) {
-  const comboLines = lineItems.filter((l) => l.menuGroupId);
-  const itemLines = lineItems.filter((l) => !l.menuGroupId);
-
-  const comboMonth = comboLines.length ? computeOrderMonth(COMBO_CUTOFF_DAY, now).orderMonth : null;
-  const itemMonth = itemLines.length ? computeOrderMonth(ITEM_CUTOFF_DAY, now).orderMonth : null;
-
-  if (comboLines.length && itemLines.length && comboMonth !== itemMonth) {
-    return [
-      { orderMonth: comboMonth, lines: comboLines },
-      { orderMonth: itemMonth, lines: itemLines },
-    ];
-  }
-  return [{ orderMonth: comboMonth || itemMonth, lines: lineItems }];
-}
-
-/** Public snapshot of today's cutoff status, for the landing/menu/order
- * pages and the /api/orders/schedule endpoint — computed server-side so the
- * frontend never duplicates this date math. */
-function scheduleStatus(now = new Date()) {
-  const item = computeOrderMonth(ITEM_CUTOFF_DAY, now);
-  const combo = computeOrderMonth(COMBO_CUTOFF_DAY, now);
-  return {
-    today: monthKey(now) + '-' + String(now.getDate()).padStart(2, '0'),
-    itemCutoffDay: ITEM_CUTOFF_DAY,
-    comboCutoffDay: COMBO_CUTOFF_DAY,
-    itemOrderMonth: item.orderMonth,
-    comboOrderMonth: combo.orderMonth,
-    itemOrderMonthLabel: monthLabel(item.orderMonth),
-    comboOrderMonthLabel: monthLabel(combo.orderMonth),
-  };
-}
-
 module.exports = {
   ITEM_CUTOFF_DAY,
   COMBO_CUTOFF_DAY,
@@ -85,6 +44,4 @@ module.exports = {
   computeOrderMonth,
   monthLabel,
   ordinalDay,
-  partitionLineItemsByCutoff,
-  scheduleStatus,
 };

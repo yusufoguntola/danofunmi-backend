@@ -7,7 +7,7 @@ const { uploadReceipt } = require('../lib/uploads');
 const { createOrderRecord, OrderValidationError } = require('../lib/orderCreation');
 const { notifyOrderStatusChange, notifyAdminOfPayment } = require('../lib/orderNotifications');
 const { isValidNigerianPhone } = require('../lib/phone');
-const { scheduleStatus } = require('../lib/orderSchedule');
+const { scheduleStatus } = require('../lib/orderTimeline');
 
 const router = express.Router();
 
@@ -54,12 +54,12 @@ router.post('/', requireBrowserOrigin, requireRecaptcha(), optionalCustomerAuth,
   }
 });
 
-// GET /api/orders/schedule — public, today's monthly-ordering cutoff status
-// for the landing/menu/order pages (see lib/orderSchedule.js). Mounted ahead
+// GET /api/orders/schedule — public, which month's run an order placed today
+// lands in, for the order page (see lib/orderTimeline.js). Mounted ahead
 // of the /:idOrNarration lookup below so "schedule" is never swallowed as an
 // order id/narration guess.
-router.get('/schedule', (req, res) => {
-  res.json(scheduleStatus());
+router.get('/schedule', async (req, res) => {
+  res.json(await scheduleStatus());
 });
 
 // GET /api/orders/:idOrNarration — public order lookup/tracking, by internal id,
@@ -247,9 +247,9 @@ router.patch('/admin/:id/location', requireAdmin, async (req, res, next) => {
 });
 
 // PATCH /api/admin/orders/:id/month — admin re-categorizing which month's
-// batch an order belongs to (e.g. pulling a combo that missed its 10th
-// cutoff back into the current month instead of leaving it auto-batched for
-// next month — see lib/orderSchedule.js). Same DELIVERED/CANCELLED guard as
+// batch an order belongs to (e.g. pulling an order placed just after the
+// timeline's closing day back into the current run instead of leaving it
+// auto-batched for next month — see lib/orderTimeline.js). Same DELIVERED/CANCELLED guard as
 // the location route above, for the same reason.
 router.patch('/admin/:id/month', requireAdmin, async (req, res, next) => {
   try {

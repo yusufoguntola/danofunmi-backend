@@ -5,8 +5,6 @@ const {
   computeOrderMonth,
   monthLabel,
   ordinalDay,
-  partitionLineItemsByCutoff,
-  scheduleStatus,
 } = require('../../src/lib/orderSchedule');
 
 describe('monthKey', () => {
@@ -52,55 +50,5 @@ describe('ordinalDay', () => {
     expect(ordinalDay(2)).toBe('2nd');
     expect(ordinalDay(3)).toBe('3rd');
     expect(ordinalDay(11)).toBe('11th');
-  });
-});
-
-describe('partitionLineItemsByCutoff', () => {
-  const comboLine = { menuGroupId: 'g1', itemName: 'Family Combo' };
-  const itemLine = { menuItemId: 'i1', menuGroupId: null, itemName: 'Buka Stew' };
-
-  test('item-only cart before the cutoff: one group, this month', () => {
-    const groups = partitionLineItemsByCutoff([itemLine], new Date(2026, 9, 5));
-    expect(groups).toEqual([{ orderMonth: '2026-10', lines: [itemLine] }]);
-  });
-
-  test('combo-only cart uses the combo cutoff', () => {
-    const groups = partitionLineItemsByCutoff([comboLine], new Date(2026, 9, 12));
-    expect(groups).toEqual([{ orderMonth: '2026-11', lines: [comboLine] }]);
-  });
-
-  test('mixed cart before both cutoffs stays a single group', () => {
-    const groups = partitionLineItemsByCutoff([comboLine, itemLine], new Date(2026, 9, 5));
-    expect(groups).toHaveLength(1);
-    expect(groups[0].orderMonth).toBe('2026-10');
-    expect(groups[0].lines).toEqual([comboLine, itemLine]);
-  });
-
-  test('mixed cart after both cutoffs stays a single group, both rolled to next month', () => {
-    const groups = partitionLineItemsByCutoff([comboLine, itemLine], new Date(2026, 9, 20));
-    expect(groups).toHaveLength(1);
-    expect(groups[0].orderMonth).toBe('2026-11');
-  });
-
-  test('mixed cart between the two cutoffs splits into two groups', () => {
-    const groups = partitionLineItemsByCutoff([comboLine, itemLine], new Date(2026, 9, 12));
-    expect(groups).toEqual([
-      { orderMonth: '2026-11', lines: [comboLine] },
-      { orderMonth: '2026-10', lines: [itemLine] },
-    ]);
-  });
-});
-
-describe('scheduleStatus', () => {
-  test('reports both cutoff days and resolved months/labels', () => {
-    const status = scheduleStatus(new Date(2026, 9, 12));
-    expect(status).toMatchObject({
-      itemCutoffDay: 15,
-      comboCutoffDay: 10,
-      itemOrderMonth: '2026-10',
-      comboOrderMonth: '2026-11',
-      itemOrderMonthLabel: 'October 2026',
-      comboOrderMonthLabel: 'November 2026',
-    });
   });
 });

@@ -164,10 +164,24 @@ const STATUS_MESSAGES = {
   CANCELLED: 'Your order has been cancelled.',
 };
 
+// The scheduled delivery window on a confirmed order's email, e.g. '16th –
+// 18th of November' (see lib/orderNotifications.js's deliveryRangeFor) —
+// terracotta-tinted like the go-live schedule panel, as the one date here
+// worth noting down.
+function deliveryTimelineHtml(deliveryRange) {
+  return `<table role="presentation" style="width:100%;background:#fbf1e9;border:1px solid rgba(196,101,47,0.25);border-radius:14px;margin:0 0 22px;">
+    <tr><td style="padding:16px 20px;">
+      <p style="margin:0 0 4px;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#a44f22;">🚚 Scheduled delivery</p>
+      <p style="margin:0;font-family:'Fraunces',Georgia,serif;font-style:italic;font-weight:700;font-size:20px;color:#16321f;">${escapeHtml(deliveryRange)}</p>
+    </td></tr>
+  </table>`;
+}
+
 // Sent whenever admin moves an order to a new status — the email counterpart
 // to the existing push notification (see lib/orderNotifications.js), so
 // customers hear about it even without the PWA installed / push enabled.
-function orderStatusEmailHtml(order) {
+// `deliveryRange`, when given, adds the scheduled delivery window.
+function orderStatusEmailHtml(order, deliveryRange) {
   const label = STATUS_LABELS[order.status] || order.status;
   const message = STATUS_MESSAGES[order.status] || `Your order status is now &ldquo;${label}&rdquo;.`;
   const origin = getFrontendOrigins()[0];
@@ -192,6 +206,7 @@ function orderStatusEmailHtml(order) {
     heading: label,
     bodyHtml: `
       <p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:#33443a;">${message}</p>
+      ${deliveryRange ? deliveryTimelineHtml(deliveryRange) : ''}
       <table role="presentation" style="width:100%;background:#f2f7ef;border-radius:14px;margin:0 0 22px;">
         <tr><td style="padding:18px 20px;">
           <p style="margin:0 0 10px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#5b6b60;">Order ${escapeHtml(order.narration)}</p>
@@ -430,7 +445,7 @@ async function sendShortlistConfirmationEmail({ to, name }) {
 /** Same best-effort/graceful-absence contract as above. A no-op if the order
  * has no customer email on file (order.customer.email) — the push
  * notification (lib/orderNotifications.js) still covers that case. */
-async function sendOrderStatusEmail(order) {
+async function sendOrderStatusEmail(order, { deliveryRange } = {}) {
   const to = order.customer?.email;
   if (!to) return;
   if (!isConfigured()) {
@@ -442,7 +457,7 @@ async function sendOrderStatusEmail(order) {
     from: fromAddress(),
     to: [{ email_address: { address: to, name: order.customer.name || '' } }],
     subject: `Order ${order.narration} — ${label}`,
-    htmlbody: orderStatusEmailHtml(order),
+    htmlbody: orderStatusEmailHtml(order, deliveryRange),
   });
 }
 

@@ -76,20 +76,20 @@ model MenuCategory {
 }
 
 model MenuItem {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  categoryId  String
-  description String?
-  icon        String?
-  active      Boolean  @default(true)
+  id                String   @id @default(cuid())
+  name              String   @unique
+  categoryId        String
+  description       String?
+  icon              String?
+  active            Boolean  @default(true)
   // Independent of `active`/category — an admin-controlled opt-out from the
   // public catalog/AI chat menu awareness for an otherwise-active item that
   // still needs to exist for internal/admin-triggered ordering (e.g. the
   // free "First Taste" item — see lib/firstTaste.js). Unlike the old
   // category-wide HIDDEN_CATEGORIES approach this replaces, a category can
   // now freely mix public and admin-only items.
-  hiddenFromCatalog Boolean @default(false)
-  createdAt   DateTime @default(now())
+  hiddenFromCatalog Boolean  @default(false)
+  createdAt         DateTime @default(now())
 
   category   MenuCategory     @relation(fields: [categoryId], references: [id])
   options    MenuItemOption[]
@@ -233,25 +233,25 @@ model PaymentReceipt {
 }
 
 model Feedback {
-  id      String @id @default(cuid())
+  id               String    @id @default(cuid())
   // Null for "generic" feedback — submitted from the standalone /feedback
   // link (see routes/publicFeedback.js's POST /general) rather than about a
   // specific delivered order. customerName/location/foodType below are only
   // ever populated on that path — an order-linked feedback row gets those
   // details from `order.customer`/`order.location`/`order.items` instead.
-  orderId      String?
-  rating       Int
-  comment      String?
-  customerName String?
-  location     String?
-  foodType     String?
+  orderId          String?
+  rating           Int
+  comment          String?
+  customerName     String?
+  location         String?
+  foodType         String?
   // Admin opt-out for the landing page's "what customers say" section —
   // independent of deletedAt, which hides a row everywhere (including the
   // admin list). Defaults true so existing/new feedback stays visible unless
   // an admin explicitly hides it.
   visibleOnLanding Boolean   @default(true)
-  deletedAt    DateTime?
-  createdAt    DateTime  @default(now())
+  deletedAt        DateTime?
+  createdAt        DateTime  @default(now())
 
   order Order? @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
@@ -376,4 +376,17 @@ model LaunchSettings {
   id              String   @id @default("singleton")
   firstTasteSlots Int      @default(20)
   updatedAt       DateTime @updatedAt
+}
+
+// Singleton row (id is always "singleton") holding the admin-set ordering
+// timeline for the current month's run: when ordering opens and closes, and
+// the delivery date range. Drives the site's order-window flyer and the
+// delivery timeline in order-confirmation notifications (lib/orderTimeline.js).
+model OrderTimeline {
+  id               String   @id @default("singleton")
+  opensOn          DateTime @db.Date
+  closesOn         DateTime @db.Date
+  deliveryStartsOn DateTime @db.Date
+  deliveryEndsOn   DateTime @db.Date
+  updatedAt        DateTime @updatedAt
 }

@@ -2,7 +2,7 @@ const prisma = require('../db');
 const { generateNarration } = require('./narration');
 const { generateOrderNumber } = require('./orderNumber');
 const { computeDiscountAmount } = require('./menuCatalog');
-const { ITEM_CUTOFF_DAY, computeOrderMonth, partitionLineItemsByCutoff } = require('./orderSchedule');
+const { resolveOrderMonth } = require('./orderTimeline');
 
 class OrderValidationError extends Error {}
 
@@ -208,13 +208,12 @@ async function createOrderRecord({
     customer = await prisma.customer.update({ where: { id: customer.id }, data: customerPatch });
   }
 
-  // A cart of only individual items or only a combo always stays one Order.
-  // One mixing both only splits into two Orders when the combo and
-  // individual-item lines actually resolve to different processing months
-  // (placed after the 10th but on/before the 15th) — each half then needs
-  // its own narration/payment reference and its own full logistics fee,
-  // since it's genuinely a separate delivery run. See lib/orderSchedule.js.
-  const groups = partitionLineItemsByCutoff(lineItems);
+  // Combos and individual items share the order timeline's single cutoff
+  // (lib/orderTimeline.js), so a cart always lands in one month's run as one
+  // Order. Still returned as `orders` (with the multi-order splitGroupId
+  // handling below) for callers built around carts that used to split
+  // across separate combo/item cutoffs.
+  const groups = [{ orderMonth: await resolveOrderMonth(), lines: lineItems }];
 
   const orders = [];
   for (const group of groups) {
@@ -334,10 +333,7 @@ async function createAdminCustomOrder({
       subtotal,
       logisticsFee,
       total: finalTotal,
-      // Admin-authored lines are always free-text, never a real combo
-      // (menuGroupId is always null here) — so only the item cutoff ever
-      // applies, and this never needs to split across months.
-      orderMonth: computeOrderMonth(ITEM_CUTOFF_DAY).orderMonth,
+      orderMonth: await resolveOrderMonth(),
       source: source || 'WEB_CHAT',
       notes: notes || null,
       statusUpdatedAt: new Date(),

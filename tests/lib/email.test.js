@@ -152,6 +152,28 @@ describe('sendOrderStatusEmail', () => {
     expect(call.htmlbody).not.toContain('Leave feedback');
   });
 
+  test('includes the scheduled delivery window when given one', async () => {
+    configureZoho();
+    const { sendOrderStatusEmail } = load();
+    mockSendMail.mockResolvedValue({});
+
+    await sendOrderStatusEmail({ ...BASE_ORDER, status: 'CONFIRMED' }, { deliveryRange: '16th – 18th of November' });
+
+    const html = mockSendMail.mock.calls[0][0].htmlbody;
+    expect(html).toContain('Scheduled delivery');
+    expect(html).toContain('16th – 18th of November');
+  });
+
+  test('omits the delivery panel when no window is given', async () => {
+    configureZoho();
+    const { sendOrderStatusEmail } = load();
+    mockSendMail.mockResolvedValue({});
+
+    await sendOrderStatusEmail({ ...BASE_ORDER, status: 'CONFIRMED' });
+
+    expect(mockSendMail.mock.calls[0][0].htmlbody).not.toContain('Scheduled delivery');
+  });
+
   test('switches the CTA to "Leave feedback" once DELIVERED', async () => {
     configureZoho();
     process.env.FRONTEND_ORIGIN = 'https://danofunmi.com';

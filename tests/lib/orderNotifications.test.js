@@ -1,8 +1,13 @@
 jest.mock('../../src/lib/push', () => ({ sendPushToPhone: jest.fn() }));
 jest.mock('../../src/lib/email', () => ({ sendOrderStatusEmail: jest.fn(), sendAdminReceiptNotificationEmail: jest.fn() }));
+jest.mock('../../src/lib/orderTimeline', () => ({
+  ...jest.requireActual('../../src/lib/orderTimeline'),
+  getOrderTimeline: jest.fn(),
+}));
 
 const { sendPushToPhone } = require('../../src/lib/push');
 const { sendOrderStatusEmail, sendAdminReceiptNotificationEmail } = require('../../src/lib/email');
+const { getOrderTimeline } = require('../../src/lib/orderTimeline');
 const { notifyOrderStatusChange, notifyAdminOfPayment } = require('../../src/lib/orderNotifications');
 
 const ORDER = {
@@ -10,6 +15,13 @@ const ORDER = {
   narration: 'DFM-AB12CD',
   status: 'PACKED',
   customer: { phone: '08012345678' },
+};
+
+const TIMELINE = {
+  opensOn: '2026-10-25',
+  closesOn: '2026-11-13',
+  deliveryStartsOn: '2026-11-16',
+  deliveryEndsOn: '2026-11-18',
 };
 
 describe('notifyOrderStatusChange', () => {
@@ -28,7 +40,51 @@ describe('notifyOrderStatusChange', () => {
       body: 'Now PACKED',
       url: '/order/order1',
     });
-    expect(sendOrderStatusEmail).toHaveBeenCalledWith(ORDER);
+    expect(sendOrderStatusEmail).toHaveBeenCalledWith(ORDER, { deliveryRange: null });
+    expect(getOrderTimeline).not.toHaveBeenCalled();
+  });
+
+  describe('on CONFIRMED', () => {
+    const CONFIRMED = { ...ORDER, status: 'CONFIRMED', orderMonth: '2026-11' };
+
+    beforeEach(() => {
+      sendPushToPhone.mockResolvedValue();
+      sendOrderStatusEmail.mockResolvedValue();
+    });
+
+    test('adds the scheduled delivery window to the push and email', async () => {
+      getOrderTimeline.mockResolvedValue(TIMELINE);
+      await notifyOrderStatusChange(CONFIRMED, { body: 'Payment confirmed!' });
+
+      expect(sendPushToPhone).toHaveBeenCalledWith(
+        '08012345678',
+        expect.objectContaining({ body: 'Payment confirmed! Delivery: 16th – 18th of November.' })
+      );
+      expect(sendOrderStatusEmail).toHaveBeenCalledWith(CONFIRMED, { deliveryRange: '16th – 18th of November' });
+    });
+
+    test('leaves it out when the order is batched for a different month than the timeline', async () => {
+      getOrderTimeline.mockResolvedValue(TIMELINE);
+      await notifyOrderStatusChange({ ...CONFIRMED, orderMonth: '2026-12' });
+
+      expect(sendPushToPhone).toHaveBeenCalledWith('08012345678', expect.objectContaining({ body: 'Now CONFIRMED' }));
+      expect(sendOrderStatusEmail).toHaveBeenCalledWith(expect.anything(), { deliveryRange: null });
+    });
+
+    test('leaves it out when no timeline is set', async () => {
+      getOrderTimeline.mockResolvedValue(null);
+      await notifyOrderStatusChange(CONFIRMED);
+      expect(sendOrderStatusEmail).toHaveBeenCalledWith(CONFIRMED, { deliveryRange: null });
+    });
+
+    test('still notifies (without it) if reading the timeline fails', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      getOrderTimeline.mockRejectedValue(new Error('db down'));
+      await notifyOrderStatusChange(CONFIRMED);
+      expect(sendPushToPhone).toHaveBeenCalled();
+      expect(sendOrderStatusEmail).toHaveBeenCalledWith(CONFIRMED, { deliveryRange: null });
+      consoleErrorSpy.mockRestore();
+    });
   });
 
   test('replaces underscores with spaces in the default body', async () => {

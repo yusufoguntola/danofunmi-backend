@@ -7,6 +7,7 @@ jest.mock('../../src/db', () => ({
   customer: { upsert: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
   location: { findUnique: jest.fn() },
   order: { create: jest.fn(), updateMany: jest.fn() },
+  orderTimeline: { findUnique: jest.fn() },
 }));
 
 const prisma = require('../../src/db');
@@ -446,135 +447,100 @@ describe('createOrderRecord', () => {
   });
 });
 
-describe('createOrderRecord — monthly schedule / splitting', () => {
+describe('createOrderRecord — monthly run (order timeline cutoff)', () => {
+  const TIMELINE_ROW = {
+    id: 'singleton',
+    opensOn: new Date('2026-10-25T00:00:00Z'),
+    closesOn: new Date('2026-11-13T00:00:00Z'),
+    deliveryStartsOn: new Date('2026-11-16T00:00:00Z'),
+    deliveryEndsOn: new Date('2026-11-18T00:00:00Z'),
+    updatedAt: new Date('2026-10-26T09:00:00Z'),
+  };
+
   afterEach(() => {
     jest.useRealTimers();
+    prisma.orderTimeline.findUnique.mockReset();
   });
 
   function mockNow(year, month, day) {
     jest.useFakeTimers();
-    jest.setSystemTime(new Date(year, month - 1, day));
+    jest.setSystemTime(new Date(year, month - 1, day, 12));
   }
 
-  test('an individual-only order on/before the 15th gets this month, no split', async () => {
-    mockNow(2026, 10, 5);
-    prisma.location.findUnique.mockResolvedValue({ id: 'loc1', active: true, logisticsFee: 1000 });
-    prisma.menuItemOption.findMany.mockResolvedValue([BUKA_STEW_OPTION]);
-    prisma.customer.upsert.mockResolvedValue({ id: 'cust1', address: '1 Market Rd', landmark: null });
-    prisma.order.create.mockResolvedValue({ id: 'order1' });
-
-    const { orders } = await createOrderRecord({
-      customerName: 'Jane Doe',
-      customerPhone: '08012345678',
-      deliveryAddress: '1 Market Rd',
-      locationId: 'loc1',
-      items: [{ menuItemOptionId: 'opt-buka-5l', quantity: 1 }],
-    });
-
-    expect(orders).toHaveLength(1);
-    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-10');
-    expect(prisma.order.updateMany).not.toHaveBeenCalled();
-  });
-
-  test('an individual-only order after the 15th rolls into next month', async () => {
-    mockNow(2026, 10, 20);
-    prisma.location.findUnique.mockResolvedValue({ id: 'loc1', active: true, logisticsFee: 1000 });
-    prisma.menuItemOption.findMany.mockResolvedValue([BUKA_STEW_OPTION]);
-    prisma.customer.upsert.mockResolvedValue({ id: 'cust1', address: '1 Market Rd', landmark: null });
-    prisma.order.create.mockResolvedValue({ id: 'order1' });
-
-    await createOrderRecord({
-      customerName: 'Jane Doe',
-      customerPhone: '08012345678',
-      deliveryAddress: '1 Market Rd',
-      locationId: 'loc1',
-      items: [{ menuItemOptionId: 'opt-buka-5l', quantity: 1 }],
-    });
-
-    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-11');
-  });
-
-  test('a combo-only order uses the stricter 10th cutoff', async () => {
-    mockNow(2026, 10, 12); // past the 10th, not past the 15th
-    prisma.location.findUnique.mockResolvedValue({ id: 'loc1', active: true, logisticsFee: 1000 });
-    prisma.menuGroup.findMany.mockResolvedValue([FAMILY_COMBO_GROUP]);
-    prisma.customer.upsert.mockResolvedValue({ id: 'cust1', address: '1 Market Rd', landmark: null });
-    prisma.order.create.mockResolvedValue({ id: 'order1' });
-
-    await createOrderRecord({
-      customerName: 'Jane Doe',
-      customerPhone: '08012345678',
-      deliveryAddress: '1 Market Rd',
-      locationId: 'loc1',
-      items: [{ menuGroupId: 'grp-family', quantity: 1 }],
-    });
-
-    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-11');
-  });
-
-  test('a mixed cart before both cutoffs stays a single order', async () => {
-    mockNow(2026, 10, 5);
+  async function placeOrder(items = [{ menuItemOptionId: 'opt-buka-5l', quantity: 1 }]) {
     prisma.location.findUnique.mockResolvedValue({ id: 'loc1', active: true, logisticsFee: 1000 });
     prisma.menuItemOption.findMany.mockResolvedValue([BUKA_STEW_OPTION]);
     prisma.menuGroup.findMany.mockResolvedValue([FAMILY_COMBO_GROUP]);
     prisma.customer.upsert.mockResolvedValue({ id: 'cust1', address: '1 Market Rd', landmark: null });
-    prisma.order.create.mockResolvedValue({ id: 'order1' });
-
-    const { orders } = await createOrderRecord({
+    prisma.order.create.mockImplementation(async ({ data }) => ({ id: `order-${prisma.order.create.mock.calls.length}`, ...data }));
+    return createOrderRecord({
       customerName: 'Jane Doe',
       customerPhone: '08012345678',
       deliveryAddress: '1 Market Rd',
       locationId: 'loc1',
-      items: [
-        { menuItemOptionId: 'opt-buka-5l', quantity: 1 },
-        { menuGroupId: 'grp-family', quantity: 1 },
-      ],
+      items,
     });
+  }
 
+  test('on or before the timeline\'s closing day, lands in the run being delivered', async () => {
+    prisma.orderTimeline.findUnique.mockResolvedValue(TIMELINE_ROW);
+    mockNow(2026, 11, 13);
+    await placeOrder();
+    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-11');
+  });
+
+  test('ordering early in the window (before month end) still lands in that run', async () => {
+    prisma.orderTimeline.findUnique.mockResolvedValue(TIMELINE_ROW);
+    mockNow(2026, 10, 26);
+    await placeOrder();
+    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-11');
+  });
+
+  test('after the closing day, rolls into the next month\'s run', async () => {
+    prisma.orderTimeline.findUnique.mockResolvedValue(TIMELINE_ROW);
+    mockNow(2026, 11, 14);
+    await placeOrder();
+    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-12');
+  });
+
+  test('a cart mixing a combo and individual items stays a single order', async () => {
+    prisma.orderTimeline.findUnique.mockResolvedValue(TIMELINE_ROW);
+    mockNow(2026, 11, 12);
+    const { orders } = await placeOrder([
+      { menuGroupId: 'grp-family', quantity: 1 },
+      { menuItemOptionId: 'opt-buka-5l', quantity: 1 },
+    ]);
     expect(orders).toHaveLength(1);
     expect(prisma.order.create).toHaveBeenCalledTimes(1);
-    const data = prisma.order.create.mock.calls[0][0].data;
-    expect(data.orderMonth).toBe('2026-10');
-    expect(data.items.create).toHaveLength(2);
+    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-11');
     expect(prisma.order.updateMany).not.toHaveBeenCalled();
   });
 
-  test('a mixed cart between the two cutoffs splits into two orders, each with its own fee', async () => {
-    mockNow(2026, 10, 12); // past combo cutoff (10th), not past item cutoff (15th)
-    prisma.location.findUnique.mockResolvedValue({ id: 'loc1', active: true, logisticsFee: 1000 });
-    prisma.menuItemOption.findMany.mockResolvedValue([BUKA_STEW_OPTION]);
-    prisma.menuGroup.findMany.mockResolvedValue([FAMILY_COMBO_GROUP]);
-    prisma.customer.upsert.mockResolvedValue({ id: 'cust1', address: '1 Market Rd', landmark: null });
-    prisma.order.create.mockResolvedValueOnce({ id: 'order-combo' }).mockResolvedValueOnce({ id: 'order-item' });
-    prisma.order.updateMany.mockResolvedValue({ count: 2 });
+  test('with no timeline set, falls back to the fixed 15th cutoff', async () => {
+    prisma.orderTimeline.findUnique.mockResolvedValue(null);
+    mockNow(2026, 10, 5);
+    await placeOrder();
+    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-10');
 
-    const { orders } = await createOrderRecord({
+    prisma.order.create.mockClear();
+    mockNow(2026, 10, 20);
+    await placeOrder();
+    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-11');
+  });
+
+  test('admin-authored orders follow the timeline too', async () => {
+    prisma.orderTimeline.findUnique.mockResolvedValue(TIMELINE_ROW);
+    mockNow(2026, 11, 14);
+    prisma.customer.upsert.mockResolvedValue({ id: 'cust1', address: '1 Market Rd', landmark: null });
+    prisma.location.findUnique.mockResolvedValue({ id: 'loc1', active: true, logisticsFee: 1000 });
+    prisma.order.create.mockResolvedValue({ id: 'order1' });
+    await createAdminCustomOrder({
       customerName: 'Jane Doe',
       customerPhone: '08012345678',
       deliveryAddress: '1 Market Rd',
       locationId: 'loc1',
-      items: [
-        { menuGroupId: 'grp-family', quantity: 1 },
-        { menuItemOptionId: 'opt-buka-5l', quantity: 1 },
-      ],
+      items: [{ itemName: 'Custom soup', size: '5L', unitPrice: 10000, quantity: 1 }],
     });
-
-    expect(prisma.order.create).toHaveBeenCalledTimes(2);
-    const [comboCall, itemCall] = prisma.order.create.mock.calls;
-    expect(comboCall[0].data.orderMonth).toBe('2026-11'); // combo rolled over past its 10th cutoff
-    expect(comboCall[0].data.items.create).toHaveLength(1);
-    expect(comboCall[0].data.logisticsFee).toBe(1000); // its own full fee — a separate delivery
-    expect(itemCall[0].data.orderMonth).toBe('2026-10'); // item line still inside its own cutoff
-    expect(itemCall[0].data.items.create).toHaveLength(1);
-    expect(itemCall[0].data.logisticsFee).toBe(1000);
-
-    expect(prisma.order.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ['order-combo', 'order-item'] } },
-      data: { splitGroupId: 'order-combo' },
-    });
-    expect(orders).toEqual([
-      { id: 'order-combo', splitGroupId: 'order-combo' },
-      { id: 'order-item', splitGroupId: 'order-combo' },
-    ]);
+    expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-12');
   });
 });

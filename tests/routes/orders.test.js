@@ -1,5 +1,6 @@
 jest.mock('../../src/db', () => ({
   order: { findFirst: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+  orderTimeline: { findUnique: jest.fn() },
   location: { findUnique: jest.fn() },
   paymentReceipt: { create: jest.fn(), update: jest.fn() },
   $transaction: jest.fn(),
@@ -101,14 +102,14 @@ describe('POST /api/orders', () => {
 });
 
 describe('GET /api/orders/schedule', () => {
-  test('200 with today\'s cutoff status', async () => {
+  test('200 with the month an order placed today lands in', async () => {
+    prisma.orderTimeline.findUnique.mockResolvedValue(null);
     const res = await request(buildApp()).get('/api/orders/schedule');
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
-      itemCutoffDay: 15,
-      comboCutoffDay: 10,
-      itemOrderMonth: expect.any(String),
-      comboOrderMonth: expect.any(String),
+      closesOn: null,
+      orderMonth: expect.stringMatching(/^\d{4}-\d{2}$/),
+      orderMonthLabel: expect.any(String),
     });
   });
 });
