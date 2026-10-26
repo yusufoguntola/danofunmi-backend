@@ -7,7 +7,7 @@ jest.mock('../../src/db', () => ({
   customer: { upsert: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
   location: { findUnique: jest.fn() },
   order: { create: jest.fn(), updateMany: jest.fn() },
-  orderTimeline: { findUnique: jest.fn() },
+  orderTimeline: { findFirst: jest.fn() },
 }));
 
 const prisma = require('../../src/db');
@@ -454,12 +454,12 @@ describe('createOrderRecord — monthly run (order timeline cutoff)', () => {
     closesOn: new Date('2026-11-13T00:00:00Z'),
     deliveryStartsOn: new Date('2026-11-16T00:00:00Z'),
     deliveryEndsOn: new Date('2026-11-18T00:00:00Z'),
-    updatedAt: new Date('2026-10-26T09:00:00Z'),
+    createdAt: new Date('2026-10-26T09:00:00Z'),
   };
 
   afterEach(() => {
     jest.useRealTimers();
-    prisma.orderTimeline.findUnique.mockReset();
+    prisma.orderTimeline.findFirst.mockReset();
   });
 
   function mockNow(year, month, day) {
@@ -483,28 +483,28 @@ describe('createOrderRecord — monthly run (order timeline cutoff)', () => {
   }
 
   test('on or before the timeline\'s closing day, lands in the run being delivered', async () => {
-    prisma.orderTimeline.findUnique.mockResolvedValue(TIMELINE_ROW);
+    prisma.orderTimeline.findFirst.mockResolvedValue(TIMELINE_ROW);
     mockNow(2026, 11, 13);
     await placeOrder();
     expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-11');
   });
 
   test('ordering early in the window (before month end) still lands in that run', async () => {
-    prisma.orderTimeline.findUnique.mockResolvedValue(TIMELINE_ROW);
+    prisma.orderTimeline.findFirst.mockResolvedValue(TIMELINE_ROW);
     mockNow(2026, 10, 26);
     await placeOrder();
     expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-11');
   });
 
   test('after the closing day, rolls into the next month\'s run', async () => {
-    prisma.orderTimeline.findUnique.mockResolvedValue(TIMELINE_ROW);
+    prisma.orderTimeline.findFirst.mockResolvedValue(TIMELINE_ROW);
     mockNow(2026, 11, 14);
     await placeOrder();
     expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-12');
   });
 
   test('a cart mixing a combo and individual items stays a single order', async () => {
-    prisma.orderTimeline.findUnique.mockResolvedValue(TIMELINE_ROW);
+    prisma.orderTimeline.findFirst.mockResolvedValue(TIMELINE_ROW);
     mockNow(2026, 11, 12);
     const { orders } = await placeOrder([
       { menuGroupId: 'grp-family', quantity: 1 },
@@ -517,7 +517,7 @@ describe('createOrderRecord — monthly run (order timeline cutoff)', () => {
   });
 
   test('with no timeline set, falls back to the fixed 15th cutoff', async () => {
-    prisma.orderTimeline.findUnique.mockResolvedValue(null);
+    prisma.orderTimeline.findFirst.mockResolvedValue(null);
     mockNow(2026, 10, 5);
     await placeOrder();
     expect(prisma.order.create.mock.calls[0][0].data.orderMonth).toBe('2026-10');
@@ -529,7 +529,7 @@ describe('createOrderRecord — monthly run (order timeline cutoff)', () => {
   });
 
   test('admin-authored orders follow the timeline too', async () => {
-    prisma.orderTimeline.findUnique.mockResolvedValue(TIMELINE_ROW);
+    prisma.orderTimeline.findFirst.mockResolvedValue(TIMELINE_ROW);
     mockNow(2026, 11, 14);
     prisma.customer.upsert.mockResolvedValue({ id: 'cust1', address: '1 Market Rd', landmark: null });
     prisma.location.findUnique.mockResolvedValue({ id: 'loc1', active: true, logisticsFee: 1000 });

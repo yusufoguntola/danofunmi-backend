@@ -378,15 +378,22 @@ model LaunchSettings {
   updatedAt       DateTime @updatedAt
 }
 
-// Singleton row (id is always "singleton") holding the admin-set ordering
-// timeline for the current month's run: when ordering opens and closes, and
-// the delivery date range. Drives the site's order-window flyer and the
-// delivery timeline in order-confirmation notifications (lib/orderTimeline.js).
+// The admin-set ordering timeline for a month's run: when ordering opens and
+// closes, and the delivery date range. Every save adds a new row rather than
+// editing one, so past timelines are kept as history — the most recently
+// created row is the current timeline. Drives the site's order-window flyer,
+// order-month assignment, and the delivery timeline in order-confirmation
+// notifications (lib/orderTimeline.js).
 model OrderTimeline {
-  id               String   @id @default("singleton")
+  id               String   @id @default(cuid())
   opensOn          DateTime @db.Date
   closesOn         DateTime @db.Date
   deliveryStartsOn DateTime @db.Date
   deliveryEndsOn   DateTime @db.Date
-  updatedAt        DateTime @updatedAt
+  // Snapshot of the saving admin's name (not a relation), so history still
+  // reads correctly if that admin account is later renamed or removed.
+  createdByName    String?
+  createdAt        DateTime @default(now())
+
+  @@index([createdAt])
 }

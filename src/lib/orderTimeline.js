@@ -1,12 +1,13 @@
 const prisma = require('../db');
 const { ITEM_CUTOFF_DAY, computeOrderMonth, monthKey, monthLabel, ordinalDay } = require('./orderSchedule');
 
-// The admin-set ordering timeline (the OrderTimeline singleton row): when
-// ordering opens and closes for the current run, and the delivery date
-// range. Dates are calendar days with no time component — stored as
-// Postgres DATE (which Prisma hands back as a UTC-midnight Date) and passed
-// over the API as 'YYYY-MM-DD' strings.
-const TIMELINE_ID = 'singleton';
+// The admin-set ordering timeline: when ordering opens and closes for the
+// current run, and the delivery date range. OrderTimeline rows are
+// append-only history — every save creates a new one, and the newest is the
+// current timeline. Dates are calendar days with no time component — stored
+// as Postgres DATE (which Prisma hands back as a UTC-midnight Date) and
+// passed over the API as 'YYYY-MM-DD' strings.
+const HISTORY_LIMIT = 50;
 const FIELDS = ['opensOn', 'closesOn', 'deliveryStartsOn', 'deliveryEndsOn'];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -23,15 +24,24 @@ function parseDateString(value) {
 
 function serialize(row) {
   if (!row) return null;
-  const out = { updatedAt: row.updatedAt };
+  const out = { id: row.id, createdAt: row.createdAt, createdByName: row.createdByName ?? null };
   for (const field of FIELDS) out[field] = toDateString(row[field]);
   return out;
 }
 
-/** The current timeline as `{ opensOn, closesOn, deliveryStartsOn,
- * deliveryEndsOn, updatedAt }` ('YYYY-MM-DD' dates), or null if none is set. */
+const NEWEST_FIRST = [{ createdAt: 'desc' }, { id: 'desc' }];
+
+/** The current (newest) timeline as `{ id, opensOn, closesOn,
+ * deliveryStartsOn, deliveryEndsOn, createdAt, createdByName }`
+ * ('YYYY-MM-DD' dates), or null if none has ever been set. */
 async function getOrderTimeline(client = prisma) {
-  return serialize(await client.orderTimeline.findUnique({ where: { id: TIMELINE_ID } }));
+  return serialize(await client.orderTimeline.findFirst({ orderBy: NEWEST_FIRST }));
+}
+
+/** Past and current timelines, newest (current) first. */
+async function listOrderTimelineHistory(client = prisma) {
+  const rows = await client.orderTimeline.findMany({ orderBy: NEWEST_FIRST, take: HISTORY_LIMIT });
+  return rows.map(serialize);
 }
 
 /**
@@ -51,14 +61,10 @@ function validateOrderTimeline(body = {}) {
   return { data };
 }
 
-async function saveOrderTimeline(data, client = prisma) {
-  return serialize(
-    await client.orderTimeline.upsert({
-      where: { id: TIMELINE_ID },
-      update: data,
-      create: { id: TIMELINE_ID, ...data },
-    })
-  );
+/** Records `data` (from validateOrderTimeline) as the new current timeline —
+ * a new history row, never an edit of an existing one. */
+async function saveOrderTimeline(data, { createdByName } = {}, client = prisma) {
+  return serialize(await client.orderTimeline.create({ data: { ...data, createdByName: createdByName || null } }));
 }
 
 /** '2026-11-16' -> '16th of November'. */
@@ -125,6 +131,7 @@ async function scheduleStatus(now = new Date()) {
 
 module.exports = {
   getOrderTimeline,
+  listOrderTimelineHistory,
   orderMonthFor,
   resolveOrderMonth,
   scheduleStatus,

@@ -1,8 +1,9 @@
-jest.mock('../../src/db', () => ({ orderTimeline: { findUnique: jest.fn(), upsert: jest.fn() } }));
+jest.mock('../../src/db', () => ({ orderTimeline: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn() } }));
 
 const prisma = require('../../src/db');
 const {
   getOrderTimeline,
+  listOrderTimelineHistory,
   validateOrderTimeline,
   saveOrderTimeline,
   formatTimelineDate,
@@ -19,25 +20,44 @@ const VALID = {
 };
 
 const ROW = {
-  id: 'singleton',
+  id: 'tl_1',
   opensOn: new Date('2026-10-25T00:00:00Z'),
   closesOn: new Date('2026-11-13T00:00:00Z'),
   deliveryStartsOn: new Date('2026-11-16T00:00:00Z'),
   deliveryEndsOn: new Date('2026-11-18T00:00:00Z'),
-  updatedAt: new Date('2026-10-26T09:00:00Z'),
+  createdByName: 'Ada Admin',
+  createdAt: new Date('2026-10-26T09:00:00Z'),
 };
+
+const SERIALIZED = { ...VALID, id: 'tl_1', createdByName: 'Ada Admin', createdAt: ROW.createdAt };
 
 beforeEach(() => jest.clearAllMocks());
 
 describe('getOrderTimeline', () => {
-  test('serializes the stored dates as YYYY-MM-DD', async () => {
-    prisma.orderTimeline.findUnique.mockResolvedValue(ROW);
-    expect(await getOrderTimeline()).toEqual({ ...VALID, updatedAt: ROW.updatedAt });
+  test('reads the newest saved timeline, dates serialized as YYYY-MM-DD', async () => {
+    prisma.orderTimeline.findFirst.mockResolvedValue(ROW);
+    expect(await getOrderTimeline()).toEqual(SERIALIZED);
+    expect(prisma.orderTimeline.findFirst).toHaveBeenCalledWith({
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
   });
 
-  test('null when no timeline is set', async () => {
-    prisma.orderTimeline.findUnique.mockResolvedValue(null);
+  test('null when no timeline has ever been set', async () => {
+    prisma.orderTimeline.findFirst.mockResolvedValue(null);
     expect(await getOrderTimeline()).toBeNull();
+  });
+});
+
+describe('listOrderTimelineHistory', () => {
+  test('returns saved timelines newest first', async () => {
+    const older = { ...ROW, id: 'tl_0', createdByName: null, createdAt: new Date('2026-09-20T09:00:00Z') };
+    prisma.orderTimeline.findMany.mockResolvedValue([ROW, older]);
+    const history = await listOrderTimelineHistory();
+    expect(history.map((t) => t.id)).toEqual(['tl_1', 'tl_0']);
+    expect(history[1].createdByName).toBeNull();
+    expect(prisma.orderTimeline.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] })
+    );
   });
 });
 
@@ -61,15 +81,11 @@ describe('validateOrderTimeline', () => {
 });
 
 describe('saveOrderTimeline', () => {
-  test('upserts the singleton row and returns it serialized', async () => {
-    prisma.orderTimeline.upsert.mockResolvedValue(ROW);
+  test('adds a new history row (never edits one) and returns it serialized', async () => {
+    prisma.orderTimeline.create.mockResolvedValue(ROW);
     const { data } = validateOrderTimeline(VALID);
-    expect(await saveOrderTimeline(data)).toEqual({ ...VALID, updatedAt: ROW.updatedAt });
-    expect(prisma.orderTimeline.upsert).toHaveBeenCalledWith({
-      where: { id: 'singleton' },
-      update: data,
-      create: { id: 'singleton', ...data },
-    });
+    expect(await saveOrderTimeline(data, { createdByName: 'Ada Admin' })).toEqual(SERIALIZED);
+    expect(prisma.orderTimeline.create).toHaveBeenCalledWith({ data: { ...data, createdByName: 'Ada Admin' } });
   });
 });
 
@@ -124,7 +140,7 @@ describe('orderMonthFor', () => {
 
 describe('scheduleStatus', () => {
   test('reports the closing day and the month an order placed now lands in', async () => {
-    prisma.orderTimeline.findUnique.mockResolvedValue(ROW);
+    prisma.orderTimeline.findFirst.mockResolvedValue(ROW);
     expect(await scheduleStatus(new Date(2026, 9, 26))).toEqual({
       today: '2026-10-26',
       closesOn: '2026-11-13',
